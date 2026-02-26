@@ -200,7 +200,7 @@ function playHeartbeat() {
 }
 let lastHandSide = null;
 let isDown = false, downTime = 0;
-const HEART_COUNT = 20000;
+const HEART_COUNT = ('ontouchstart' in window || navigator.maxTouchPoints > 0) ? 10000 : 20000;
 const HAND_MAP_X = 80;
 const HAND_MAP_Y = 60;
 const HAND_EFFECT = 0.65;
@@ -292,7 +292,7 @@ function initThree() {
     antialias: true, alpha: true
   });
   renderer.setSize(innerWidth, innerHeight);
-  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  renderer.setPixelRatio(Math.min(devicePixelRatio, isMobile ? 1.5 : 2));
   renderer.setClearColor(0x000000, 0);
 
   if (!isMobile) {
@@ -304,9 +304,10 @@ function initThree() {
   }
 
   // Stars
+  const starCount = isMobile ? 3000 : 7000;
   const sg = new THREE.BufferGeometry();
-  const sp = new Float32Array(7000*3), ss = new Float32Array(7000);
-  for (let i=0;i<7000;i++) {
+  const sp = new Float32Array(starCount*3), ss = new Float32Array(starCount);
+  for (let i=0;i<starCount;i++) {
     sp[i*3]=(Math.random()-.5)*400; sp[i*3+1]=(Math.random()-.5)*400; sp[i*3+2]=-120+Math.random()*90;
     ss[i]=.04+Math.random()*.1;
   }
@@ -395,7 +396,7 @@ function buildHeartSystem() {
 function buildTextMeshes() {
   msgs.forEach((txt, idx) => {
     const tex = makeTextTex(txt);
-    const w = 10 + Math.random()*4;
+    const w = isMobile ? (6 + Math.random()*2) : (10 + Math.random()*4);
     const mesh = new THREE.Mesh(
       new THREE.PlaneGeometry(w, w*0.092),
       new THREE.MeshBasicMaterial({map:tex,transparent:true,opacity:0,side:THREE.DoubleSide,depthWrite:false})
@@ -584,36 +585,16 @@ function toggleExplode() {
     instPill.textContent = '💖 Mãi rực rỡ nhé các bông hồng A10-K1!';
     instPill.classList.add('active');
     heroTitle.classList.add('beating');
-    textMeshes.forEach((m,i)=>{ m.userData.born = performance.now()*0.001 + i*0.022; });
+    textMeshes.forEach((m,i)=>{
+      m.userData.born = performance.now()*0.001 + i*0.022;
+      m.userData.orbitR = null; // reset so new orbit params assigned
+    });
     // Shuffle vị trí ảnh mỗi lần mở
     window._placedPhotoTargets = [];
     photoMeshes.forEach((obj,i)=>{
       if (!obj.photo) return;
       const m = obj.photo;
-      const urls = photoUrls;
-      const idx = i;
-      let angle = (idx/urls.length)*Math.PI*2 + Math.random()*1.2;
-      let rr = 12 + Math.random()*28;
-      if (isMobile) rr = 6 + Math.random()*12;
-      let tx, ty, tz, tries=0;
-      const placed = window._placedPhotoTargets;
-      const w = m.geometry.parameters.width, h = m.geometry.parameters.height;
-      while (tries<40) {
-        const vAngle = (Math.random()-0.5)*Math.PI*0.8;
-        tx = Math.cos(angle)*rr*Math.cos(vAngle);
-        ty = Math.sin(vAngle)*rr*0.7-1;
-        tz = Math.sin(angle)*rr*0.4-2;
-        let ok=true;
-        for (let p of placed) {
-          if (Math.hypot(tx-p.x,ty-p.y) < (Math.max(w,p.w)+Math.max(h,p.h))*0.55) { ok=false; break; }
-        }
-        if (ok) break;
-        angle += (Math.PI*2/urls.length)*(0.2+Math.random()*0.6);
-        rr += 1.5+Math.random()*3; tries++;
-      }
-      placed.push({x:tx,y:ty,z:tz,w,h});
-      m.userData.target = new THREE.Vector3(tx,ty,tz);
-      m.userData.tiltZ  = (Math.random()-0.5)*0.28;
+      m.userData.orbitR = null; // reset so new orbit params assigned
       m.userData.born   = performance.now()*0.001 + i*0.04;
     });
   } else {
@@ -681,7 +662,6 @@ function animate() {
   if (heartSystem) {
     heartSystem.material.uniforms.time.value = time;
 
-    // Tim cố định giữa, dịch xuống tránh tiêu đề
     heartSystem.position.x += (0  - heartSystem.position.x)*.1;
     heartSystem.position.y += (-3 - heartSystem.position.y)*.1;
     heartSystem.position.z += (0  - heartSystem.position.z)*.1;
@@ -689,14 +669,12 @@ function animate() {
     heartSystem.rotation.y += (0 - heartSystem.rotation.y)*.05;
     heartSystem.rotation.z += (0 - heartSystem.rotation.z)*.05;
 
-    // Heartbeat 72bpm — chỉ khi đóng
     const cycle = 60/72;
     const tBeat = (time%cycle)/cycle;
     const lub = Math.max(0, 1-Math.abs(tBeat-0.06)/0.06);
     const dub = Math.max(0, 1-Math.abs(tBeat-0.22)/0.07)*0.65;
     const beatAmt = Math.max(lub,dub);
 
-    // Play sound on lub peak
     if (!isExploded && lub > 0.95 && !heartSystem._lastLub) {
       playHeartbeat();
       heartSystem._lastLub = true;
@@ -706,7 +684,6 @@ function animate() {
     const beat = 1.0 + (isExploded ? 0 : 0.028*beatAmt);
     heartSystem.scale.setScalar(beat);
 
-    // Particles lerp + hand offset
     const lsp = isExploded ? .028 : .11;
     const pos  = heartSystem.geometry.attributes.position.array;
     const base = heartSystem.geometry.attributes.basePos.array;
@@ -726,32 +703,50 @@ function animate() {
     heartSystem.geometry.attributes.position.needsUpdate = true;
   }
 
-  // Text meshes
+  // ── Text meshes: orbit autonomously always ──────────────────────────────────
   textMeshes.forEach((m, idx) => {
     if (isExploded) {
       const elapsed = time - (m.userData.born||0);
       if (elapsed < (m.userData.delay||0)) return;
       m.visible = true;
-      const tgt = m.userData.target;
-      const wx = handX*HAND_EFFECT, wy = handY*HAND_EFFECT;
-      m.position.x += (tgt.x+wx - m.position.x)*.06;
-      m.position.y += (tgt.y+wy - m.position.y)*.06;
-      m.position.z += (tgt.z    - m.position.z)*.06;
+
+      // Each text has its own orbit params
+      const ud = m.userData;
+      if (!ud.orbitR) {
+        // assign stable orbit params once
+        ud.orbitR    = (isMobile ? 6 : 14) + Math.random() * (isMobile ? 8 : 22);
+        ud.orbitTilt = (Math.random()-0.5)*1.1;      // tilt plane
+        ud.orbitPhase= idx * (Math.PI*2/textMeshes.length) + Math.random()*.8;
+        ud.orbitSpeed= (0.08 + Math.random()*0.12) * (Math.random()<0.5?1:-1);
+        ud.bobAmp    = 0.18 + Math.random()*0.28;
+        ud.bobSpeed  = 0.5 + Math.random()*0.6;
+        ud.bobOffset = Math.random()*Math.PI*2;
+      }
+
+      const angle  = time * ud.orbitSpeed + ud.orbitPhase;
+      const wx = handX*HAND_EFFECT*0.35, wy = handY*HAND_EFFECT*0.35;
+      const tx = Math.cos(angle) * ud.orbitR + wx;
+      const tz = Math.sin(angle) * ud.orbitR * 0.35;
+      const ty = Math.sin(angle * 0.7 + ud.orbitTilt) * ud.orbitR * 0.45
+               + Math.sin(time * ud.bobSpeed + ud.bobOffset) * ud.bobAmp
+               + wy;
+
+      m.position.x += (tx - m.position.x) * .045;
+      m.position.y += (ty - m.position.y) * .045;
+      m.position.z += (tz - m.position.z) * .045;
       m.lookAt(camera.position);
-      m.material.opacity += (1-m.material.opacity)*.05;
-      m.position.y += Math.sin(time*.6+idx*.4)*.022;
-      m.position.x += Math.cos(time*.5+idx*.3)*.015;
+      m.material.opacity += (0.92 - m.material.opacity) * .05;
     } else {
-      m.material.opacity += (0-m.material.opacity)*.16;
+      m.material.opacity += (0 - m.material.opacity) * .16;
       const hx=heartSystem.position.x, hy=heartSystem.position.y, hz=heartSystem.position.z;
-      m.position.x += (hx-m.position.x)*.10;
-      m.position.y += (hy-m.position.y)*.10;
-      m.position.z += (hz-m.position.z)*.10;
+      m.position.x += (hx - m.position.x) * .10;
+      m.position.y += (hy - m.position.y) * .10;
+      m.position.z += (hz - m.position.z) * .10;
       if (m.material.opacity<.003) { m.visible=false; m.position.set(hx,hy,hz); }
     }
   });
 
-  // Raycaster for hover (desktop)
+  // Raycaster for hover (desktop only)
   if (!isMobile && raycaster && pointer) {
     raycaster.setFromCamera(pointer, camera);
     const hits = raycaster.intersectObjects(photoMeshes.map(o=>o.photo).filter(Boolean));
@@ -759,20 +754,19 @@ function animate() {
     photoMeshes.forEach(o=>{ if(o.photo) o.photo.userData.isHover=(o.photo===hitMesh); });
   }
 
-  // Photo meshes
+  // ── Photo meshes: orbit autonomously in 3D ──────────────────────────────────
   photoMeshes.forEach((obj, idx) => {
     const m = obj.photo, glow = obj.glow;
     if (!m) return;
 
     const isHover = !!m.userData.isHover;
-    // Hover scale
     const tScale = isHover ? 1.09 : 1.0;
     m.scale.x += (tScale - m.scale.x)*.12;
     m.scale.y += (tScale - m.scale.y)*.12;
 
     if (glow) {
       glow.visible = m.visible;
-      const glowT = isHover ? 0.75 : (isExploded ? 0.05 : 0);
+      const glowT = isHover ? 0.75 : (isExploded ? 0.08 : 0);
       glow.material.opacity += (glowT - glow.material.opacity)*.08;
       if (m.geometry?.parameters) {
         const bw=m.geometry.parameters.width, bh=m.geometry.parameters.height;
@@ -787,26 +781,50 @@ function animate() {
       if (elapsed<(m.userData.delay||0)) return;
       m.visible=true; if(glow) glow.visible=true;
 
-      const tgt=m.userData.target;
-      const wx=handX*HAND_EFFECT, wy=handY*HAND_EFFECT;
-      m.position.x += (tgt.x+wx - m.position.x)*.04;
-      m.position.y += (tgt.y+wy - m.position.y)*.04;
-      m.position.z += (tgt.z    - m.position.z)*.04;
+      const ud = m.userData;
+      // assign orbit params once per explode (reset in toggleExplode)
+      if (!ud.orbitR) {
+        const total = photoMeshes.length;
+        ud.orbitR     = (isMobile ? 4 : 10) + Math.random() * (isMobile ? 9 : 20);
+        ud.orbitPhase = idx * (Math.PI*2/total) + Math.random();
+        ud.orbitSpeed = (0.06 + Math.random()*0.10) * (Math.random()<0.5?1:-1);
+        ud.orbitTiltX = (Math.random()-0.5)*0.9;  // rotation of orbit plane
+        ud.orbitTiltZ = (Math.random()-0.5)*0.6;
+        ud.bobAmp     = 0.12 + Math.random()*0.22;
+        ud.bobSpeed   = 0.4 + Math.random()*0.55;
+        ud.bobOffset  = Math.random()*Math.PI*2;
+        ud.tiltZ      = (Math.random()-0.5)*0.32;
+        ud.spinVel    = (Math.random()-0.5)*0.004;
+        ud.spinAccum  = 0;
+      }
+
+      const angle = time * ud.orbitSpeed + ud.orbitPhase;
+      const wx = handX*HAND_EFFECT*0.3, wy = handY*HAND_EFFECT*0.3;
+
+      // 3D orbit: rotate base circle by tilt angles
+      const cx = Math.cos(angle) * ud.orbitR;
+      const cy = Math.sin(angle) * ud.orbitR * 0.5;
+      const cz = Math.sin(angle) * ud.orbitR * 0.4;
+
+      // Apply tilt: rotate around X and Z axes
+      const tx = cx * Math.cos(ud.orbitTiltZ) - cy * Math.sin(ud.orbitTiltZ) + wx;
+      const ty = cx * Math.sin(ud.orbitTiltZ) + cy * Math.cos(ud.orbitTiltZ)
+               + Math.sin(time * ud.bobSpeed + ud.bobOffset) * ud.bobAmp + wy;
+      const tz = cz + Math.cos(time*0.3+idx)*0.15 - 2;
+
+      m.position.x += (tx - m.position.x) * .038;
+      m.position.y += (ty - m.position.y) * .038;
+      m.position.z += (tz - m.position.z) * .038;
 
       if (glow) { glow.position.copy(m.position); glow.position.z=m.position.z-0.02; }
 
       m.lookAt(camera.position);
-      m.rotateZ(m.userData.tiltZ||0);
-      // Slow spin when floating
-      m.userData.spinZ = (m.userData.spinZ||0) + (m.userData.spinSpeed||((Math.random()-0.5)*0.0008));
-      m.userData.spinSpeed = m.userData.spinSpeed||((Math.random()-0.5)*0.0008);
+      ud.spinAccum += ud.spinVel;
+      m.rotateZ(ud.tiltZ + ud.spinAccum);
 
-      m.position.y += Math.sin(time*.4+idx*.6)*.025;
-      m.position.x += Math.cos(time*.35+idx*.5)*.018;
-
-      m.material.opacity += (0.93-m.material.opacity)*.04;
+      m.material.opacity += (0.93 - m.material.opacity) * .04;
     } else {
-      m.material.opacity += (0-m.material.opacity)*.14;
+      m.material.opacity += (0 - m.material.opacity) * .14;
       const hx=heartSystem.position.x, hy=heartSystem.position.y, hz=heartSystem.position.z;
       m.position.x += (hx-m.position.x)*.09;
       m.position.y += (hy-m.position.y)*.09;
@@ -816,6 +834,8 @@ function animate() {
         m.visible=false; if(glow) glow.visible=false;
         m.position.set(hx,hy,hz);
         if(glow) glow.position.set(hx,hy,hz-0.02);
+        // reset orbit so next explode gets fresh params
+        m.userData.orbitR = null;
       }
     }
   });
@@ -848,7 +868,7 @@ function resizeFX() {
 
 // Cherry blossoms
 const petals = [];
-const PETAL_COUNT = 55;
+const PETAL_COUNT = ('ontouchstart' in window || navigator.maxTouchPoints > 0) ? 25 : 55;
 function initPetals() {
   for (let i=0;i<PETAL_COUNT;i++) {
     petals.push({
