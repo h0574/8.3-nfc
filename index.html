@@ -260,6 +260,978 @@ function makeTextTex(text) {
 
   ctx.shadowBlur = 22;
   ctx.shadowColor = 'rgba(255,107,157,0.65)';
+  ctx.font = '500 52px "DM Sans", sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+
+  // Gradient trắng → hồng
+  const grad = ctx.createLinearGradient(0, 20, W, 76);
+  grad.addColorStop(0,   '#ffffff');
+  grad.addColorStop(0.4, '#ffd6e8');
+  grad.addColorStop(0.8, '#ff9ec4');
+  grad.addColorStop(1,   '#ff6b9d');
+  ctx.fillStyle = grad;
+  ctx.fillText(text, W/2, H/2);
+
+  return new THREE.CanvasTexture(cv);
+}
+
+// ─── Init Three ───────────────────────────────────────────────────────────────
+function initThree() {
+  scene = new THREE.Scene();
+  isMobile = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
+
+  // FOV fixed at 60° for consistent look on all devices
+  const fov = 60;
+  const aspect = innerWidth / innerHeight;
+  camera = new THREE.PerspectiveCamera(fov, aspect, 0.1, 1000);
+
+  // Heart world-space half-height ≈ 13 units (sc=13).
+  // We want the heart to fill ~55% of screen height.
+  // visibleHeight = 2 * camZ * tan(fov/2)
+  // heartHeight(13) / visibleHeight = 0.55  →  camZ = 13 / (0.55 * tan(30°)) ≈ 40.7
+  // But on portrait mobile the width is the constraint, so we also check width:
+  // visibleWidth = visibleHeight * aspect
+  // We pick the camZ that satisfies BOTH (heart fits in 80% width AND 55% height)
+  const heartHalfH = 13; // world units, matches sc=13
+  const tanHalfFov = Math.tan((fov / 2) * Math.PI / 180);
+  // On portrait (mobile): height drives the view → heart fills ~52% of screen height
+  // On landscape (desktop): use the tighter of height or width constraint
+  const isPortrait = innerHeight > innerWidth;
+  const camZByHeight = heartHalfH / (0.52 * tanHalfFov);
+  const camZByWidth  = heartHalfH / (0.40 * tanHalfFov * aspect);
+  camera.position.z = isPortrait ? camZByHeight : Math.max(camZByHeight, camZByWidth);
+
+  renderer = new THREE.WebGLRenderer({
+    canvas: document.getElementById('three-canvas'),
+    antialias: true, alpha: true
+  });
+  renderer.setSize(innerWidth, innerHeight);
+  renderer.setPixelRatio(Math.min(devicePixelRatio, isMobile ? 1.5 : 2));
+  renderer.setClearColor(0x000000, 0);
+
+  if (!isMobile) {
+    raycaster = new THREE.Raycaster();
+    pointer = new THREE.Vector2();
+    window.addEventListener('pointermove', (e) => {
+      pointer.set((e.clientX/innerWidth)*2-1, -(e.clientY/innerHeight)*2+1);
+    });
+  }
+
+  // Stars
+  const starCount = isMobile ? 3000 : 7000;
+  const sg = new THREE.BufferGeometry();
+  const sp = new Float32Array(starCount*3), ss = new Float32Array(starCount);
+  for (let i=0;i<starCount;i++) {
+    sp[i*3]=(Math.random()-.5)*400; sp[i*3+1]=(Math.random()-.5)*400; sp[i*3+2]=-120+Math.random()*90;
+    ss[i]=.04+Math.random()*.1;
+  }
+  sg.setAttribute('position',new THREE.BufferAttribute(sp,3));
+  sg.setAttribute('size',new THREE.BufferAttribute(ss,1));
+  const starMat = new THREE.ShaderMaterial({
+    uniforms:{time:{value:0}},
+    vertexShader:`attribute float size;uniform float time;varying float vO;
+      void main(){vO=.12+.08*sin(time*1.3+position.x*.9+position.y*.4);
+        vec4 mv=modelViewMatrix*vec4(position,1.);gl_PointSize=size*(560./-mv.z);gl_Position=projectionMatrix*mv;}`,
+    fragmentShader:`varying float vO;void main(){float d=length(gl_PointCoord-.5);if(d>.5)discard;gl_FragColor=vec4(1.,.92,.96,vO*(1.-d*2.));}`,
+    transparent:true,blending:THREE.AdditiveBlending,depthWrite:false
+  });
+  scene.add(new THREE.Points(sg, starMat));
+  scene._starMat = starMat;
+
+  buildHeartSystem();
+  buildTextMeshes();
+
+  const pl = new THREE.PointLight(0xffb3cc, 8, 80);
+  pl.position.set(0,5,10);
+  scene.add(pl);
+
+  const onDn = ()=>{ isDown=true; downTime=Date.now(); };
+  const onMv = (x,y)=>{ targetX=(x/innerWidth-.5)*HAND_MAP_X; targetY=(-(y/innerHeight)+.5)*HAND_MAP_Y; };
+  const onDnTouch = (x,y)=>{ isDown=true; downTime=Date.now(); targetX=(x/innerWidth-.5)*HAND_MAP_X; targetY=(-(y/innerHeight)+.5)*HAND_MAP_Y; };
+  const onUp = ()=>{ isDown=false; if(Date.now()-downTime<250) toggleExplode(); };
+
+  window.addEventListener('mousedown', onDn);
+  window.addEventListener('mousemove', e=>onMv(e.clientX,e.clientY));
+  window.addEventListener('mouseup', onUp);
+  window.addEventListener('touchstart',e=>{e.preventDefault();onDnTouch(e.touches[0].clientX,e.touches[0].clientY)},{passive:false});
+  window.addEventListener('touchmove',e=>{e.preventDefault();onMv(e.touches[0].clientX,e.touches[0].clientY)},{passive:false});
+  window.addEventListener('touchend',onUp);
+}
+
+// ─── Heart System ─────────────────────────────────────────────────────────────
+function buildHeartSystem() {
+  const geo = new THREE.BufferGeometry();
+  const pos=new Float32Array(HEART_COUNT*3), col=new Float32Array(HEART_COUNT*3);
+  const base=new Float32Array(HEART_COUNT*3), tgt=new Float32Array(HEART_COUNT*3);
+  const sz=new Float32Array(HEART_COUNT), rnd=new Float32Array(HEART_COUNT);
+
+  let i=0;
+  while(i<HEART_COUNT){
+    const x=(Math.random()-.5)*3.2,y=(Math.random()-.5)*3.2,z=(Math.random()-.5)*3.2;
+    const a=x*x+(9/4)*y*y+z*z-1;
+    if(a*a*a-x*x*z*z*z-(9/80)*y*y*z*z*z<0){
+      // sc=13: heart world half-height. Camera auto-adjusts via aspect formula.
+      const sc = 13;
+      base[i*3]=x*sc; base[i*3+1]=z*sc+1.8; base[i*3+2]=y*sc;
+      pos[i*3]=base[i*3]; pos[i*3+1]=base[i*3+1]; pos[i*3+2]=base[i*3+2];
+      const phi=Math.acos(2*Math.random()-1), theta=Math.random()*Math.PI*2;
+      const r=25+Math.random()*55;
+      tgt[i*3]=r*Math.sin(phi)*Math.cos(theta); tgt[i*3+1]=r*Math.sin(phi)*Math.sin(theta)*.7; tgt[i*3+2]=r*Math.cos(phi)*.5;
+      rnd[i]=Math.random();
+      const t=Math.random();
+      if(t>.88){col[i*3]=1;col[i*3+1]=.98;col[i*3+2]=1;sz[i]=.12+Math.random()*.12;}
+      else if(t>.5){col[i*3]=1;col[i*3+1]=.76+Math.random()*.15;col[i*3+2]=.85+Math.random()*.1;sz[i]=.05+Math.random()*.05;}
+      else{col[i*3]=1;col[i*3+1]=.52+Math.random()*.18;col[i*3+2]=.6+Math.random()*.2;sz[i]=.03+Math.random()*.04;}
+      i++;
+    }
+  }
+  geo.setAttribute('position',new THREE.BufferAttribute(pos,3));
+  geo.setAttribute('color',new THREE.BufferAttribute(col,3));
+  geo.setAttribute('basePos',new THREE.BufferAttribute(base,3));
+  geo.setAttribute('target',new THREE.BufferAttribute(tgt,3));
+  geo.setAttribute('size',new THREE.BufferAttribute(sz,1));
+  geo.setAttribute('random',new THREE.BufferAttribute(rnd,1));
+
+  const mat = new THREE.ShaderMaterial({
+    uniforms:{time:{value:0},px:{value:renderer.getPixelRatio()}},
+    vertexShader:`attribute float size,random;attribute vec3 color;varying vec3 vC;uniform float time,px;
+      void main(){vC=color;float f=.55+.45*sin(time*(1.8+random*2.5)+random*6.28);
+        float shine=1.+.3*pow(sin(time*.5+random*3.14),8.);float fs=size*f*shine*px;
+        if(color.b>.95)fs*=1.5+.5*sin(time*4.+random*12.);
+        vec4 mv=modelViewMatrix*vec4(position,1.);gl_PointSize=fs*(1000./-mv.z);gl_Position=projectionMatrix*mv;}`,
+    fragmentShader:`varying vec3 vC;void main(){float d=length(gl_PointCoord-.5);if(d>.5)discard;
+      float a=pow((1.-d*2.)*(1.-d*1.2),.7);gl_FragColor=vec4(vC,a);}`,
+    transparent:true,blending:THREE.AdditiveBlending,depthWrite:false
+  });
+  heartSystem = new THREE.Points(geo,mat);
+  scene.add(heartSystem);
+}
+
+// ─── Text Meshes ──────────────────────────────────────────────────────────────
+function buildTextMeshes() {
+  msgs.forEach((txt, idx) => {
+    const tex = makeTextTex(txt);
+    const w = 9 + Math.random()*3;
+    const mesh = new THREE.Mesh(
+      new THREE.PlaneGeometry(w, w*0.092),
+      new THREE.MeshBasicMaterial({map:tex,transparent:true,opacity:0,side:THREE.DoubleSide,depthWrite:false})
+    );
+    mesh.position.set(0,0,0); mesh.visible = false;
+    const phi=Math.acos(2*Math.random()-1), theta=Math.random()*Math.PI*2;
+    const r=18+Math.random()*40;
+    mesh.userData.target = new THREE.Vector3(
+      r*Math.sin(phi)*Math.cos(theta)*1.1,
+      r*Math.sin(phi)*Math.sin(theta)*.65,
+      r*Math.cos(phi)*.45+3
+    );
+    mesh.userData.delay = idx*0.018;
+    mesh.userData.born  = 0;
+    scene.add(mesh);
+    textMeshes.push(mesh);
+  });
+}
+
+// ─── Photo URLs ───────────────────────────────────────────────────────────────
+const photoUrls = [
+  "https://i.ibb.co/HD3tF6Ry/586842180-122195323730326452-6389351653584219824-n.jpg",
+  "https://i.ibb.co/Z6xRY4dn/586582619-122195423120326452-1426713942701089678-n.jpg",
+  "https://i.ibb.co/7Jj2TNT6/586210755-122195323838326452-6727449979373333836-n.jpg",
+  "https://i.ibb.co/B2F3FjdN/565188825-122191399268326452-156843864060431274-n.jpg",
+  "https://i.ibb.co/KjtWTWDQ/586057407-122195323898326452-6048508443298677119-n.jpg",
+  "https://i.ibb.co/21PPpS62/z7564230212523-b11f36cd3eec5d0b8abb797ff5ea48dc.jpg",
+  "https://i.ibb.co/MyRvKS38/z7564230204228-0aa0bb93cad257b56b76eec047e9249a.jpg",
+  "https://i.ibb.co/YCWs41b/z7564230197610-a77ce04e0dcae79b0aed5dbcafed7d6d.jpg",
+  "https://i.ibb.co/Q3ZRjLSP/z7564230166197-8b3ac985b553164fa2b271bcc596022e.jpg",
+  "https://i.ibb.co/Jwj9kT9q/z7564230145985-f52ad6f969c9824d4e67393e68f66095.jpg",
+  "https://i.ibb.co/WNMsYs9c/z7564230141265-8aaa68d20cb53c3c530059282dc9d3b1.jpg",
+  "https://i.ibb.co/SXvd9zFJ/z7564230139541-fd9a5e3af54346c7cb3567067f0def26.jpg",
+  "https://i.ibb.co/6Jn0ryBQ/z7564230129020-33f1691ad10a5daf583bcc45693ef11a.jpg",
+  "https://i.ibb.co/LXbNSwJc/z7564230083133-018b40c4ac3b5017ccda8af8d1415816.jpg",
+  "https://i.ibb.co/V7fY7wK/z7564230078218-1e8ae707c2d4ea8608c96bc5dc8a1e72.jpg",
+  "https://i.ibb.co/2YY2QWR6/z7564230025251-30db95a63656705e42991a6608690af0.jpg",
+  "https://i.ibb.co/wrKNRgzK/z7564230023743-9a48ca9441bb90bb6bb04cee691b656e.jpg",
+  "https://i.ibb.co/ycZt0PbS/z7564229979475-e1327d3ebccfdf5cda148e27f452c092.jpg",
+  "https://i.ibb.co/Xx1kXXP5/z7564229937497-bdee1106e42b721eb82b5090a0cb1aa8.jpg",
+  "https://i.ibb.co/CKNPwv7b/z7564229912629-c064668c882f0c3547a09d90be98ee66.jpg",
+  "https://i.ibb.co/27PX1VrF/z7564229907687-12a04e91b6bb0e9e49f2943d99e0cacf.jpg",
+  "https://i.ibb.co/twrMm55k/z7564229890662-6b3cd073b15d4cb6db0b62367b2676b0.jpg",
+  "https://i.ibb.co/mr5Nr3fX/z7564229860903-a8431415450bf7bec8e5c03b48b4bc56.jpg",
+  "https://i.ibb.co/nMt9GB0D/z7564229819117-c86145d6ad88b553f0aff022c1652164.jpg",
+  "https://i.ibb.co/JFMMhhXb/z7564229798337-de3deece209243dc54f5de712684a510.jpg",
+  "https://i.ibb.co/CpDdXhCQ/z7564229786406-a5754a3b0ea1e8c69900ee5dd107f8e7.jpg",
+  "https://i.ibb.co/TBLH99T8/z7564229762819-502bdfa0ce847f72b357bf9deb5a430f.jpg",
+  "https://i.ibb.co/d0cjW2JN/z7564229781889-8ade91b9b3004acf667f22d87b039deb.jpg",
+  "https://i.ibb.co/xq8nxbyp/z7564229687840-050ebf0024b9d903664b46ea9654773a.jpg",
+  "https://i.ibb.co/Y4r1NGRX/z7564229659382-d4feddc50202a7797846822ebcc899c8.jpg",
+  "https://i.ibb.co/QFvfcx4W/z7564229618342-6995bfc2ea1afa12b81a00c90652f872.jpg",
+  "https://i.ibb.co/zTpMkwrj/z7564229585751-203f2218308b13a1fe6a478725482088.jpg",
+  "https://i.ibb.co/TqHfzMd8/z7564229578371-3c8dac476685825a9af355201f4ad10c.jpg",
+  "https://i.ibb.co/CsB0jXzD/z7564229577182-459563c803e3c16578c3e98e7129f719.jpg",
+  "https://i.ibb.co/V0gmPjhx/z7564229570534-217aef712a1039ba5f153c55f87fec8b.jpg",
+  "https://i.ibb.co/DTbB7nz/z7564229486712-4ce51854a5eabe7db8c2e1abe4fc0867.jpg",
+  "https://i.ibb.co/mVVbZDFC/z7564229484651-54c2c5abeb1d84b942bda8a83578c561.jpg",
+  "https://i.ibb.co/nNSZNmj8/z7564229472321-7b7dbad39149295af21d5158c476e222.jpg",
+  "https://i.ibb.co/4R44fdsf/z7564229445487-3f59b51bbec0aa70e83514684c5d6ba3.jpg",
+];
+
+let photoMeshes = [];
+
+// ─── Polaroid texture builder ─────────────────────────────────────────────────
+function makePolaroidTex(imgUrl, callback) {
+  const img = new Image();
+  img.crossOrigin = 'anonymous';
+  img.onload = () => {
+    const aspect = img.width / img.height;
+    const IW = 400, IH = Math.round(400 / aspect);
+    const padSide = 20, padTop = 20, padBot = 62;
+    const PW = IW + padSide*2, PH = IH + padTop + padBot;
+    const cv = document.createElement('canvas');
+    cv.width = PW; cv.height = PH;
+    const ctx = cv.getContext('2d');
+
+    // Drop shadow
+    ctx.shadowColor = 'rgba(0,0,0,0.55)';
+    ctx.shadowBlur = 28;
+    ctx.shadowOffsetX = 2;
+    ctx.shadowOffsetY = 8;
+    ctx.fillStyle = '#ffffff';
+    if (ctx.roundRect) ctx.roundRect(0, 0, PW, PH, 6);
+    else { ctx.beginPath(); ctx.rect(0,0,PW,PH); }
+    ctx.fill();
+
+    // Reset shadow
+    ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0;
+    ctx.shadowOffsetX = 0; ctx.shadowOffsetY = 0;
+
+    // Photo
+    ctx.drawImage(img, padSide, padTop, IW, IH);
+
+    // Subtle vignette
+    const vig = ctx.createRadialGradient(
+      padSide+IW/2, padTop+IH/2, IH*0.28,
+      padSide+IW/2, padTop+IH/2, IH*0.72
+    );
+    vig.addColorStop(0,'rgba(0,0,0,0)');
+    vig.addColorStop(1,'rgba(0,0,0,0.14)');
+    ctx.fillStyle = vig;
+    ctx.fillRect(padSide, padTop, IW, IH);
+
+    callback(new THREE.CanvasTexture(cv), PW/PH);
+  };
+  img.onerror = () => { console.warn('❌ Failed:', imgUrl); callback(null); };
+  img.src = imgUrl;
+}
+
+// ─── Build Photo Meshes (Polaroid) ───────────────────────────────────────────
+function buildPhotoMeshes() {
+  const urls = photoUrls;
+  urls.forEach((url, idx) => {
+    makePolaroidTex(url, (tex, aspect) => {
+      if (!tex) return;
+      // Photo width: ~6 world units ≈ half heart width, visible clearly at 50cm
+      const baseW = 5.5 + Math.random()*1.5;
+      const w = baseW, h = baseW / (aspect || 0.82);
+
+      const mesh = new THREE.Mesh(
+        new THREE.PlaneGeometry(w, h),
+        new THREE.MeshBasicMaterial({map:tex,transparent:true,opacity:0,side:THREE.DoubleSide,depthWrite:false})
+      );
+      mesh.visible = false;
+      mesh.userData.baseScale = new THREE.Vector3(1,1,1);
+
+      // Glow sprite
+      const gc = document.createElement('canvas'); gc.width=128; gc.height=128;
+      const gctx = gc.getContext('2d');
+      const gg = gctx.createRadialGradient(64,64,0,64,64,64);
+      gg.addColorStop(0,'rgba(255,200,220,0.85)');
+      gg.addColorStop(0.4,'rgba(255,140,180,0.3)');
+      gg.addColorStop(1,'rgba(255,140,180,0)');
+      gctx.fillStyle=gg; gctx.fillRect(0,0,128,128);
+      const glowMat = new THREE.SpriteMaterial({
+        map:new THREE.CanvasTexture(gc),transparent:true,opacity:0,
+        blending:THREE.AdditiveBlending,depthWrite:false
+      });
+      const glow = new THREE.Sprite(glowMat);
+      glow.scale.set(w*1.5,h*1.5,1); glow.visible=false; glow.renderOrder=-1;
+
+      // Place target avoiding overlaps
+      if (!window._placedPhotoTargets) window._placedPhotoTargets = [];
+      const placed = window._placedPhotoTargets;
+      let angle = (idx/urls.length)*Math.PI*2;
+      let rr = isMobile ? 6+Math.random()*12 : 12+Math.random()*28;
+      let tx, ty, tz, tries=0;
+      while (tries<40) {
+        const vAngle = (Math.random()-0.5)*Math.PI*0.8;
+        tx = Math.cos(angle)*rr*Math.cos(vAngle);
+        ty = Math.sin(vAngle)*rr*0.7-1;
+        tz = Math.sin(angle)*rr*0.4-2;
+        let ok=true;
+        for (let p of placed) {
+          if (Math.hypot(tx-p.x,ty-p.y) < (Math.max(w,p.w)+Math.max(h,p.h))*0.55) { ok=false; break; }
+        }
+        if (ok) break;
+        angle += (Math.PI*2/urls.length)*(0.2+Math.random()*0.6);
+        rr += 1.5+Math.random()*3; tries++;
+      }
+      placed.push({x:tx,y:ty,z:tz,w,h});
+
+      mesh.userData.target = new THREE.Vector3(tx,ty,tz);
+      mesh.userData.delay  = idx*(isMobile?0.03:0.04);
+      mesh.userData.born   = 0;
+      mesh.userData.tiltZ  = (Math.random()-0.5)*0.28;
+      mesh.position.set(0,0,0);
+      glow.position.set(0,0,-0.02);
+
+      scene.add(mesh); scene.add(glow);
+      photoMeshes.push({photo:mesh, frame:null, glow});
+    });
+  });
+}
+
+// ─── Toggle ───────────────────────────────────────────────────────────────────
+function toggleExplode() {
+  if (Date.now()-cooldown < 600) return;
+  cooldown = Date.now();
+  isExploded = !isExploded;
+
+  bloomEl.classList.add('flash');
+  setTimeout(()=>bloomEl.classList.remove('flash'),400);
+
+  if (isExploded) {
+    instPill.textContent = '💖 Mãi rực rỡ nhé các bông hồng A10-K1!';
+    instPill.classList.add('active');
+    heroTitle.classList.add('beating');
+    textMeshes.forEach((m,i)=>{
+      m.userData.born = performance.now()*0.001 + i*0.022;
+      m.userData.orbitR = null; // reset so new orbit params assigned
+    });
+    // Shuffle vị trí ảnh mỗi lần mở
+    window._placedPhotoTargets = [];
+    photoMeshes.forEach((obj,i)=>{
+      if (!obj.photo) return;
+      const m = obj.photo;
+      m.userData.orbitR = null; // reset so new orbit params assigned
+      m.userData.born   = performance.now()*0.001 + i*0.04;
+    });
+  } else {
+    instPill.innerHTML = '<span>✦</span> Chạm màn hình hoặc dùng cử chỉ tay để khám phá';
+    instPill.classList.remove('active');
+    heroTitle.classList.remove('beating');
+  }
+}
+
+// ─── Hand tracking ────────────────────────────────────────────────────────────
+async function initHands() {
+  const statusEl = document.createElement('div');
+  statusEl.style.cssText = 'position:fixed;top:16px;right:20px;z-index:20;font-size:.65rem;letter-spacing:.12em;text-transform:uppercase;padding:6px 14px;border-radius:100px;border:1px solid rgba(255,255,255,.1);color:rgba(255,255,255,.3);backdrop-filter:blur(20px);transition:all .5s';
+  statusEl.textContent = '⏳ Đang tải nhận diện tay...';
+  document.body.appendChild(statusEl);
+
+  const wait=()=>new Promise(r=>{const iv=setInterval(()=>{if(window.Hands&&window.Camera){clearInterval(iv);r();}},100);});
+  try {
+    await wait();
+    statusEl.textContent = '📷 Đang xin quyền camera...';
+    const hands=new window.Hands({locateFile:f=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`});
+    hands.setOptions({maxNumHands:1,modelComplexity:1,minDetectionConfidence:.78,minTrackingConfidence:.78});
+    hands.onResults(res=>{
+      if(!res.multiHandLandmarks?.length||isDown) {
+        statusEl.textContent='🖐 Chưa thấy tay';
+        statusEl.style.color='rgba(255,255,255,.25)';
+        statusEl.style.borderColor='rgba(255,255,255,.08)';
+        return;
+      }
+      statusEl.textContent='✋ Đang nhận diện';
+      statusEl.style.color='#ffb3cc';
+      statusEl.style.borderColor='rgba(255,107,157,.35)';
+      const lm=res.multiHandLandmarks[0];
+      targetX+=((1-lm[9].x-.5)*HAND_MAP_X-targetX)*.2;
+      targetY+=((-lm[9].y+.5)*HAND_MAP_Y-targetY)*.2;
+      const pinch=Math.hypot(lm[4].x-lm[8].x,lm[4].y-lm[8].y)<.055;
+      const flip=lastHandSide!==null&&(lm[2].x>lm[17].x)!==lastHandSide;
+      lastHandSide=lm[2].x>lm[17].x;
+      if(pinch||flip) toggleExplode();
+    });
+    new window.Camera(videoEl,{
+      onFrame:async()=>{try{await hands.send({image:videoEl});}catch(e){}},
+      width:640,height:480
+    }).start();
+    statusEl.textContent='🖐 Chưa thấy tay';
+    statusEl.style.color='rgba(255,255,255,.25)';
+  } catch(e) {
+    statusEl.textContent='❌ Không có camera';
+    statusEl.style.color='rgba(255,100,100,.5)';
+    statusEl.style.borderColor='rgba(255,100,100,.2)';
+    console.warn('Hand tracking unavailable',e);
+  }
+}
+
+// ─── Animate ──────────────────────────────────────────────────────────────────
+function animate() {
+  requestAnimationFrame(animate);
+  const time = performance.now()*.001;
+
+  handX += (targetX-handX)*HAND_SMOOTH;
+  handY += (targetY-handY)*HAND_SMOOTH;
+
+  if (scene._starMat) scene._starMat.uniforms.time.value = time;
+
+  if (heartSystem) {
+    heartSystem.material.uniforms.time.value = time;
+
+    // Tim cố định giữa, dịch xuống nhẹ tránh tiêu đề
+    const heartTargetY = isMobile ? -1.5 : -3;
+    heartSystem.position.x += (0  - heartSystem.position.x)*.1;
+    heartSystem.position.y += (heartTargetY - heartSystem.position.y)*.1;
+    heartSystem.position.z += (0  - heartSystem.position.z)*.1;
+    heartSystem.rotation.x += (0 - heartSystem.rotation.x)*.05;
+    heartSystem.rotation.y += (0 - heartSystem.rotation.y)*.05;
+    heartSystem.rotation.z += (0 - heartSystem.rotation.z)*.05;
+
+    const cycle = 60/72;
+    const tBeat = (time%cycle)/cycle;
+    const lub = Math.max(0, 1-Math.abs(tBeat-0.06)/0.06);
+    const dub = Math.max(0, 1-Math.abs(tBeat-0.22)/0.07)*0.65;
+    const beatAmt = Math.max(lub,dub);
+
+    if (!isExploded && lub > 0.95 && !heartSystem._lastLub) {
+      playHeartbeat();
+      heartSystem._lastLub = true;
+    }
+    if (lub < 0.3) heartSystem._lastLub = false;
+
+    const beat = 1.0 + (isExploded ? 0 : 0.028*beatAmt);
+    heartSystem.scale.setScalar(beat);
+
+    const lsp = isExploded ? .028 : .11;
+    const pos  = heartSystem.geometry.attributes.position.array;
+    const base = heartSystem.geometry.attributes.basePos.array;
+    const tgt  = heartSystem.geometry.attributes.target.array;
+    const hOffX = isExploded ? handX*HAND_EFFECT : 0;
+    const hOffY = isExploded ? handY*HAND_EFFECT : 0;
+    for (let j=0;j<HEART_COUNT*3;j++) {
+      let goal = isExploded ? tgt[j] : base[j];
+      const axis = j%3;
+      if (isExploded) {
+        if(axis===0) goal+=hOffX;
+        else if(axis===1) goal+=hOffY;
+      }
+      const drift = isExploded ? Math.sin(time*.7+j*.0006)*.06 : 0;
+      pos[j] += (goal-pos[j])*lsp + drift;
+    }
+    heartSystem.geometry.attributes.position.needsUpdate = true;
+  }
+
+  // ── Text meshes: orbit autonomously always ──────────────────────────────────
+  textMeshes.forEach((m, idx) => {
+    if (isExploded) {
+      const elapsed = time - (m.userData.born||0);
+      if (elapsed < (m.userData.delay||0)) return;
+      m.visible = true;
+
+      // Each text has its own orbit params
+      const ud = m.userData;
+      if (!ud.orbitR) {
+        // assign stable orbit params once
+        // Text flies closer to camera than photos (lower z offset = closer)
+        const textRing = Math.floor(idx / 6); // 6 texts per ring
+        const posInTextRing = idx % 6;
+        const textRings = Math.ceil(textMeshes.length / 6);
+
+        ud.orbitR    = 16 + textRing * 6 + Math.random()*2;
+        ud.orbitTilt = (Math.random()-0.5)*0.9;
+        ud.orbitPhase= (posInTextRing / 6) * Math.PI * 2 + (Math.random()-0.5)*0.4;
+        ud.orbitSpeed= (0.10 + Math.random()*0.14) * (textRing%2===0 ? 1 : -1);
+        ud.heightBand = ((textRing / Math.max(textRings-1, 1)) - 0.5) * 10;
+        ud.bobAmp    = 0.15 + Math.random()*0.25;
+        ud.bobSpeed  = 0.45 + Math.random()*0.5;
+        ud.bobOffset = Math.random()*Math.PI*2;
+      }
+
+      const angle  = time * ud.orbitSpeed + ud.orbitPhase;
+      const wx = handX*HAND_EFFECT*0.35, wy = handY*HAND_EFFECT*0.35;
+      const tx = Math.cos(angle) * ud.orbitR + wx;
+      const tz = Math.sin(angle) * ud.orbitR * 0.25 + 2; // slightly in front (positive z = towards camera)
+      const ty = Math.sin(angle * 0.65 + ud.orbitTilt) * ud.orbitR * 0.4
+               + ud.heightBand
+               + Math.sin(time * ud.bobSpeed + ud.bobOffset) * ud.bobAmp
+               + wy;
+
+      m.position.x += (tx - m.position.x) * .045;
+      m.position.y += (ty - m.position.y) * .045;
+      m.position.z += (tz - m.position.z) * .045;
+      m.lookAt(camera.position);
+      m.material.opacity += (0.92 - m.material.opacity) * .05;
+    } else {
+      m.material.opacity += (0 - m.material.opacity) * .16;
+      const hx=heartSystem.position.x, hy=heartSystem.position.y, hz=heartSystem.position.z;
+      m.position.x += (hx - m.position.x) * .10;
+      m.position.y += (hy - m.position.y) * .10;
+      m.position.z += (hz - m.position.z) * .10;
+      if (m.material.opacity<.003) { m.visible=false; m.position.set(hx,hy,hz); }
+    }
+  });
+
+  // Raycaster for hover (desktop only)
+  if (!isMobile && raycaster && pointer) {
+    raycaster.setFromCamera(pointer, camera);
+    const hits = raycaster.intersectObjects(photoMeshes.map(o=>o.photo).filter(Boolean));
+    const hitMesh = hits.length ? hits[0].object : null;
+    photoMeshes.forEach(o=>{ if(o.photo) o.photo.userData.isHover=(o.photo===hitMesh); });
+  }
+
+  // ── Photo meshes: orbit autonomously in 3D ──────────────────────────────────
+  photoMeshes.forEach((obj, idx) => {
+    const m = obj.photo, glow = obj.glow;
+    if (!m) return;
+
+    const isHover = !!m.userData.isHover;
+    const tScale = isHover ? 1.09 : 1.0;
+    m.scale.x += (tScale - m.scale.x)*.12;
+    m.scale.y += (tScale - m.scale.y)*.12;
+
+    if (glow) {
+      glow.visible = m.visible;
+      const glowT = isHover ? 0.75 : (isExploded ? 0.08 : 0);
+      glow.material.opacity += (glowT - glow.material.opacity)*.08;
+      if (m.geometry?.parameters) {
+        const bw=m.geometry.parameters.width, bh=m.geometry.parameters.height;
+        const pulse = isHover ? 1+Math.sin(time*6+idx)*.04 : 1;
+        glow.scale.x += (bw*1.5*pulse - glow.scale.x)*.12;
+        glow.scale.y += (bh*1.5*pulse - glow.scale.y)*.12;
+      }
+    }
+
+    if (isExploded) {
+      const elapsed = time-(m.userData.born||0);
+      if (elapsed<(m.userData.delay||0)) return;
+      m.visible=true; if(glow) glow.visible=true;
+
+      const ud = m.userData;
+      // assign orbit params once per explode (reset in toggleExplode)
+      if (!ud.orbitR) {
+        const total = photoMeshes.length;
+        // Spiral layers: spread photos in rings, each ring at different radius + height band
+        // This guarantees no 2 photos orbit the same path
+        const ring = Math.floor(idx / 8);          // 8 photos per ring layer
+        const posInRing = idx % 8;
+        const rings = Math.ceil(total / 8);
+
+        // Each ring has different radius and height offset
+        const baseR   = 16;
+        const ringStep = 10;
+        ud.orbitR     = baseR + ring * ringStep + Math.random() * 3;
+
+        // Evenly space within ring, with small jitter
+        ud.orbitPhase = (posInRing / 8) * Math.PI * 2 + (Math.random()-0.5)*0.3;
+        // Alternate direction per ring
+        ud.orbitSpeed = (0.055 + Math.random()*0.07) * (ring%2===0 ? 1 : -1);
+
+        // Height: each ring is at a different vertical band
+        const heightBand = (ring / Math.max(rings-1,1)) - 0.5;
+        ud.orbitHeightOffset = heightBand * 16;
+        ud.orbitTiltZ = (Math.random()-0.5) * 0.5;
+        ud.bobAmp     = 0.08 + Math.random()*0.15;
+        ud.bobSpeed   = 0.3 + Math.random()*0.4;
+        ud.bobOffset  = Math.random()*Math.PI*2;
+        ud.tiltZ      = (Math.random()-0.5)*0.25;
+        ud.spinVel    = (Math.random()-0.5)*0.003;
+        ud.spinAccum  = 0;
+      }
+
+      const angle = time * ud.orbitSpeed + ud.orbitPhase;
+      const wx = handX*HAND_EFFECT*0.3, wy = handY*HAND_EFFECT*0.3;
+
+      const tx = Math.cos(angle) * ud.orbitR + wx;
+      const ty = Math.sin(angle * 0.6 + ud.orbitTiltZ) * ud.orbitR * 0.35
+               + ud.orbitHeightOffset
+               + Math.sin(time * ud.bobSpeed + ud.bobOffset) * ud.bobAmp
+               + wy;
+      const tz = Math.sin(angle) * ud.orbitR * 0.3 - 2;
+
+      m.position.x += (tx - m.position.x) * .038;
+      m.position.y += (ty - m.position.y) * .038;
+      m.position.z += (tz - m.position.z) * .038;
+
+      if (glow) { glow.position.copy(m.position); glow.position.z=m.position.z-0.02; }
+
+      m.lookAt(camera.position);
+      ud.spinAccum += ud.spinVel;
+      m.rotateZ(ud.tiltZ + ud.spinAccum);
+
+      m.material.opacity += (0.93 - m.material.opacity) * .04;
+    } else {
+      m.material.opacity += (0 - m.material.opacity) * .14;
+      const hx=heartSystem.position.x, hy=heartSystem.position.y, hz=heartSystem.position.z;
+      m.position.x += (hx-m.position.x)*.09;
+      m.position.y += (hy-m.position.y)*.09;
+      m.position.z += (hz-m.position.z)*.09;
+      if (glow) { glow.position.copy(m.position); glow.position.z=m.position.z-0.02; }
+      if (m.material.opacity<.003) {
+        m.visible=false; if(glow) glow.visible=false;
+        m.position.set(hx,hy,hz);
+        if(glow) glow.position.set(hx,hy,hz-0.02);
+        // reset orbit so next explode gets fresh params
+        m.userData.orbitR = null;
+      }
+    }
+  });
+
+  renderer.render(scene, camera);
+}
+
+// ─── Resize ───────────────────────────────────────────────────────────────────
+window.addEventListener('resize', ()=>{
+  const aspect = innerWidth / innerHeight;
+  camera.aspect = aspect;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+  const tanHalfFov = Math.tan(30 * Math.PI / 180); // tan(FOV/2) for FOV=60
+  const heartHalfH = 13;
+  const isPortrait = innerHeight > innerWidth;
+  const camZByHeight = heartHalfH / (0.52 * tanHalfFov);
+  const camZByWidth  = heartHalfH / (0.40 * tanHalfFov * aspect);
+  camera.position.z = isPortrait ? camZByHeight : Math.max(camZByHeight, camZByWidth);
+});
+
+// ─── Boot ─────────────────────────────────────────────────────────────────────
+// ─── FX Canvas: Cherry Blossom + Mouse Trail ──────────────────────────────
+const fxCanvas = document.getElementById('fx-canvas');
+const fx = fxCanvas.getContext('2d');
+let fxW, fxH;
+
+function resizeFX() {
+  fxCanvas.width  = fxW = innerWidth;
+  fxCanvas.height = fxH = innerHeight;
+}
+
+// Cherry blossoms
+const petals = [];
+const PETAL_COUNT = ('ontouchstart' in window || navigator.maxTouchPoints > 0) ? 25 : 55;
+function initPetals() {
+  for (let i=0;i<PETAL_COUNT;i++) {
+    petals.push({
+      x: Math.random()*fxW,
+      y: Math.random()*fxH - fxH,
+      r: 3 + Math.random()*5,
+      speed: 0.5 + Math.random()*1.2,
+      drift: (Math.random()-0.5)*0.6,
+      spin: Math.random()*Math.PI*2,
+      spinSpeed: (Math.random()-0.5)*0.06,
+      opacity: 0.4 + Math.random()*0.5,
+      color: `hsl(${340+Math.random()*25},${70+Math.random()*20}%,${78+Math.random()*12}%)`
+    });
+  }
+}
+
+function drawPetal(p) {
+  fx.save();
+  fx.translate(p.x, p.y);
+  fx.rotate(p.spin);
+  fx.globalAlpha = p.opacity;
+  fx.fillStyle = p.color;
+  fx.beginPath();
+  // Hình cánh hoa anh đào
+  fx.moveTo(0, -p.r);
+  fx.bezierCurveTo(p.r*0.8, -p.r*0.8, p.r*1.1, p.r*0.3, 0, p.r);
+  fx.bezierCurveTo(-p.r*1.1, p.r*0.3, -p.r*0.8, -p.r*0.8, 0, -p.r);
+  fx.fill();
+  fx.restore();
+}
+
+// Mouse trail
+const trail = [];
+const TRAIL_MAX = 28;
+let mouseTrailX = -9999, mouseTrailY = -9999;
+let mouseHasMoved = false;
+window.addEventListener('mousemove', e => { mouseTrailX=e.clientX; mouseTrailY=e.clientY; mouseHasMoved=true; });
+window.addEventListener('touchmove', e => {
+  if(e.touches.length){ mouseTrailX=e.touches[0].clientX; mouseTrailY=e.touches[0].clientY; mouseHasMoved=true; }
+}, {passive:true});
+
+function animateFX() {
+  requestAnimationFrame(animateFX);
+  fx.clearRect(0,0,fxW,fxH);
+
+  // Trail — chỉ vẽ sau khi user thực sự di chuột
+  if (mouseHasMoved) trail.push({x:mouseTrailX, y:mouseTrailY, age:0});
+  if (trail.length > TRAIL_MAX) trail.shift();
+  for (let i=0;i<trail.length;i++) {
+    trail[i].age++;
+    const t = i/trail.length;
+    const alpha = t * 0.55 * (1 - trail[i].age/60);
+    if (alpha <= 0) continue;
+    const size = t * 8 + 2;
+    const hue = 330 + t*30;
+    fx.beginPath();
+    fx.arc(trail[i].x, trail[i].y, size, 0, Math.PI*2);
+    fx.fillStyle = `hsla(${hue},90%,75%,${alpha})`;
+    fx.fill();
+    // Sparkle nhỏ
+    if (i === trail.length-1) {
+      for (let s=0;s<3;s++) {
+        const sx = trail[i].x + (Math.random()-0.5)*20;
+        const sy = trail[i].y + (Math.random()-0.5)*20;
+        fx.beginPath();
+        fx.arc(sx,sy,1+Math.random()*2,0,Math.PI*2);
+        fx.fillStyle = `hsla(${hue+20},100%,90%,${0.6*Math.random()})`;
+        fx.fill();
+      }
+    }
+  }
+
+  // Cherry blossoms
+  for (let p of petals) {
+    p.x += p.drift + Math.sin(Date.now()*0.001 + p.spin)*0.4;
+    p.y += p.speed;
+    p.spin += p.spinSpeed;
+    if (p.y > fxH + 20) {
+      p.y = -20; p.x = Math.random()*fxW;
+    }
+    drawPetal(p);
+  }
+}
+
+window.onload = () => {
+  resizeFX();
+  initPetals();
+  initThree();
+  buildPhotoMeshes();
+  animate();
+  animateFX();
+  initHands();
+  setTimeout(()=>{ loadingEl.classList.add('out'); setTimeout(()=>loadingEl.remove(),1300); }, 2800);
+};
+
+window.addEventListener('resize', resizeFX);
+</script>
+</body>
+</html>    background:linear-gradient(135deg,#fff 0%,#ffb3cc 60%,#ff6b9d 100%);
+    -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+    opacity:0;animation:up .8s .3s var(--ease-smooth) forwards}
+  .load-bar-wrap{width:160px;height:1.5px;background:rgba(255,255,255,.1);border-radius:2px;overflow:hidden;
+    opacity:0;animation:up .6s .6s var(--ease-smooth) forwards}
+  .load-bar{height:100%;background:linear-gradient(90deg,#ffb3cc,#ff6b9d);
+    width:0%;animation:prog 2.4s .8s var(--ease-smooth) forwards}
+  .load-lbl{font-size:.68rem;letter-spacing:.35em;text-transform:uppercase;
+    color:rgba(255,255,255,.28);opacity:0;animation:up .6s .9s var(--ease-smooth) forwards}
+  @keyframes prog{to{width:100%}}
+
+  #three-canvas{position:fixed;inset:0;display:block}
+
+  .ambient{position:fixed;inset:0;pointer-events:none;z-index:1;overflow:hidden}
+  .orb{position:absolute;border-radius:50%;filter:blur(90px);opacity:0;
+    animation:orbin 2s 2.6s var(--ease-smooth) forwards}
+  .orb-1{width:520px;height:520px;background:radial-gradient(circle,rgba(255,107,157,.16),transparent 70%);
+    top:-120px;left:-100px}
+  .orb-2{width:600px;height:600px;background:radial-gradient(circle,rgba(255,180,200,.09),transparent 70%);
+    bottom:-160px;right:-120px;animation-delay:2.9s}
+  .orb-3{width:280px;height:280px;background:radial-gradient(circle,rgba(255,107,157,.10),transparent 70%);
+    top:35%;left:58%;animation-delay:3.1s}
+  @keyframes orbin{to{opacity:1}}
+
+  #hero{position:fixed;top:0;left:0;right:0;z-index:10;padding:clamp(14px,3vw,52px) clamp(14px,4vw,60px) 0;
+    pointer-events:none;opacity:0;transform:translateY(-20px);
+    animation:down 1s 3s var(--ease-smooth) forwards}
+  .eyebrow{font-size:.55rem;font-weight:500;letter-spacing:.3em;text-transform:uppercase;
+    color:#ffb3cc;opacity:.5;margin-bottom:8px}
+  .hero-title{font-family:'DM Serif Display',serif;
+    font-size:clamp(1.6rem,5.5vw,7rem);line-height:1.08;font-style:italic;padding-bottom:0.06em;
+    background:linear-gradient(160deg,#fff 0%,#ffe4ee 35%,#ffb3cc 65%,#ff6b9d 100%);
+    -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+    filter:drop-shadow(0 0 60px rgba(255,107,157,.25));letter-spacing:-.02em}
+  .hero-sub{margin-top:8px;font-size:.8rem;font-weight:300;
+    color:rgba(255,255,255,.4);letter-spacing:.04em;line-height:1.4}
+  .pill{display:inline-flex;align-items:center;gap:6px;padding:5px 14px;
+    background:var(--glass);border:1px solid var(--glass-border);border-radius:100px;
+    backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);
+    font-size:.72rem;font-weight:500;letter-spacing:.08em;color:#ffb3cc;margin-top:22px}
+  .pill-dot{width:6px;height:6px;background:var(--rose);border-radius:50%;
+    box-shadow:0 0 8px var(--rose);animation:pulse 2s ease-in-out infinite}
+  @keyframes pulse{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.5);opacity:.6}}
+  .divider{width:1px;height:48px;
+    background:linear-gradient(to bottom,transparent,rgba(255,107,157,.4),transparent);
+    margin:8px 0 0;display:block;transform:translateY(0.5px)}
+
+  #instruction{position:fixed;bottom:clamp(20px,5vw,48px);
+    left:0;right:0;margin:0 auto;
+    display:flex;justify-content:center;align-items:center;
+    z-index:10;pointer-events:none;opacity:0;
+    animation:up 1s 3.5s var(--ease-smooth) forwards}
+  .inst-pill{display:inline-flex;align-items:center;justify-content:center;gap:clamp(6px,2vw,12px);padding:clamp(8px,2vw,14px) clamp(14px,4vw,28px);
+    background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);
+    border-radius:100px;backdrop-filter:blur(40px);-webkit-backdrop-filter:blur(40px);
+    font-size:clamp(.65rem,2.2vw,.82rem);font-weight:400;color:rgba(255,255,255,.45);white-space:normal;
+    box-shadow:0 20px 80px rgba(0,0,0,.4);
+    transition:all .6s var(--ease-smooth)}
+  .inst-pill.active{background:rgba(255,107,157,.12);border-color:rgba(255,107,157,.25);
+    color:#ffb3cc;box-shadow:0 20px 80px rgba(255,107,157,.2)}
+
+  #footer{position:fixed;bottom:clamp(8px,2vw,16px);right:clamp(12px,3vw,28px);font-size:clamp(.48rem,1.5vw,.6rem);letter-spacing:.15em;
+    text-transform:uppercase;color:rgba(255,255,255,.12);z-index:10;pointer-events:none;
+    opacity:0;animation:up .8s 4s var(--ease-smooth) forwards}
+
+  #bloom{position:fixed;inset:0;
+    background:radial-gradient(circle at center,rgba(255,180,210,.2),transparent 70%);
+    z-index:2;pointer-events:none;opacity:0;transition:opacity .35s}
+  #bloom.flash{opacity:1}
+
+  @keyframes up{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
+  @keyframes down{from{opacity:0;transform:translateY(-20px)}to{opacity:1;transform:translateY(0)}}
+  @keyframes hbeat{0%,100%{transform:scale(1)}14%{transform:scale(1.06)}28%{transform:scale(1)}42%{transform:scale(1.04)}70%{transform:scale(1)}}
+  .beating{animation:hbeat 1.2s ease-in-out infinite;display:inline-block}
+
+  @media (max-width: 480px) {
+    #hero { padding: 16px 16px 0 !important; }
+    .eyebrow { font-size:.5rem; letter-spacing:.2em; margin-bottom:6px; }
+    .hero-title { font-size:clamp(1.9rem,7.5vw,2.6rem) !important; line-height:1.06; }
+    .hero-sub { font-size:.75rem; margin-top:6px; }
+    .pill { font-size:.64rem; padding:5px 12px; margin-top:12px; }
+    .inst-pill { font-size:.68rem !important; padding:9px 16px !important; }
+  }
+</style>
+</head>
+<body>
+
+<div id="cursor"></div>
+
+<div id="loading">
+  <div class="load-logo">8/3</div>
+  <div class="load-bar-wrap"><div class="load-bar"></div></div>
+  <div class="load-lbl">Preparing something special</div>
+</div>
+
+<div class="ambient">
+  <div class="orb orb-1"></div>
+  <div class="orb orb-2"></div>
+  <div class="orb orb-3"></div>
+</div>
+
+<canvas id="three-canvas"></canvas>
+<canvas id="fx-canvas" style="position:fixed;inset:0;pointer-events:none;z-index:3;"></canvas>
+<div id="bloom"></div>
+
+<div id="hero">
+  <div class="eyebrow">Designed for A10-K1 · International Women's Day</div>
+  <div class="hero-title" id="hero-title">Happy 8/3</div>
+  <div class="hero-sub">Gửi tới những bông hồng rực rỡ nhất A10-K1</div>
+  <div class="pill"><span class="pill-dot"></span> Special Edition — 2026</div>
+</div>
+
+<div id="instruction">
+  <div class="inst-pill" id="inst-pill">
+    <span>✦</span> Chạm màn hình hoặc dùng cử chỉ tay để khám phá
+  </div>
+</div>
+
+<div id="footer">A10-K1 Exclusive · Special Edition</div>
+
+<div style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none">
+  <video id="webcam" playsinline></video>
+</div>
+
+<script>
+const videoEl    = document.getElementById('webcam');
+const cursorEl   = document.getElementById('cursor');
+const loadingEl  = document.getElementById('loading');
+const bloomEl    = document.getElementById('bloom');
+const instPill   = document.getElementById('inst-pill');
+const heroTitle  = document.getElementById('hero-title');
+
+let scene, camera, renderer;
+let heartSystem, textMeshes = [];
+let raycaster, pointer;
+let isMobile = false;
+let handX = 0, handY = 0, targetX = 0, targetY = 0;
+let isExploded = false;
+let cooldown = 0;
+let audioCtx = null;
+
+function playHeartbeat() {
+  try {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const ac = audioCtx;
+    const now = ac.currentTime;
+    // LUB
+    const playThud = (t, freq, dur, gain) => {
+      const osc = ac.createOscillator();
+      const env = ac.createGain();
+      osc.connect(env); env.connect(ac.destination);
+      osc.type = 'sine'; osc.frequency.setValueAtTime(freq, t);
+      osc.frequency.exponentialRampToValueAtTime(freq*0.3, t+dur);
+      env.gain.setValueAtTime(0, t);
+      env.gain.linearRampToValueAtTime(gain, t+0.01);
+      env.gain.exponentialRampToValueAtTime(0.001, t+dur);
+      osc.start(t); osc.stop(t+dur+0.05);
+    };
+    playThud(now,       90, 0.18, 0.5);  // lub
+    playThud(now+0.005, 55, 0.12, 0.3);  // lub low
+    playThud(now+0.22,  75, 0.14, 0.35); // dub
+    playThud(now+0.225, 45, 0.10, 0.2);  // dub low
+  } catch(e) {}
+}
+let lastHandSide = null;
+let isDown = false, downTime = 0;
+const HEART_COUNT = ('ontouchstart' in window || navigator.maxTouchPoints > 0) ? 10000 : 20000;
+const HAND_MAP_X = 80;
+const HAND_MAP_Y = 60;
+const HAND_EFFECT = 0.65;
+const HAND_SMOOTH = 0.06;
+
+document.addEventListener('mousemove', e => {
+  cursorEl.style.left = e.clientX + 'px';
+  cursorEl.style.top  = e.clientY + 'px';
+});
+
+// ─── Messages ────────────────────────────────────────────────────────────────
+const msgs = [
+  "Chúc các bạn luôn xinh theo cách riêng",
+  "Luôn cười nhiều hơn lo",
+  "Học hành thuận lợi, điểm số dịu dàng",
+  "Thi cử suôn sẻ như mở wifi",
+  "Ngủ đủ giấc trước mỗi kỳ thi",
+  "Ăn ngon mà không tăng cân",
+  "Crush rep tin nhắn trong 3 giây",
+  "Ra đường gặp toàn may mắn",
+  "Mỗi ngày đều có điều để vui",
+  "Luôn tự tin bước về phía trước",
+  "Được yêu thương thật nhiều",
+  "Có người lắng nghe mỗi khi buồn",
+  "Có bạn thân ở bên mọi lúc",
+  "Luôn giữ trái tim ấm áp",
+  "Không áp lực nào đánh bại được các bạn",
+  "Ước mơ nào cũng dám theo đuổi",
+  "Mệt thì nghỉ, đừng bỏ cuộc",
+  "Sai thì sửa, đừng tự trách",
+  "Luôn tin mình đủ giỏi",
+  "Luôn tin mình đủ xứng đáng",
+  "Thanh xuân thật rực rỡ",
+  "A10-K1 mãi là ký ức đẹp",
+  "Lớp luôn tràn ngập tiếng cười",
+  "Mỗi tiết học đều thành kỷ niệm",
+  "Cảm ơn vì đã làm lớp dịu dàng hơn",
+  "Cảm ơn vì đã chịu đựng tụi mình 😆",
+  "Năm cuối thật đáng giá",
+  "Chúc 8/3 thật nhiều quà",
+  "Thật nhiều lời yêu thương",
+  "Thi đâu đỗ đó",
+  "Chọn ngành đúng đam mê",
+  "Tương lai không sợ hãi",
+  "Đi xa nhưng đừng quên nhau",
+  "Lớn lên vẫn giữ sự hồn nhiên",
+  "Mãi là bạn tốt của nhau",
+  "Hạnh phúc mãi về sau"
+];
+
+// ─── Text texture: gradient hồng ─────────────────────────────────────────────
+function makeTextTex(text) {
+  const W = 1024, H = 96;
+  const cv = document.createElement('canvas');
+  cv.width = W; cv.height = H;
+  const ctx = cv.getContext('2d');
+
+  ctx.shadowBlur = 22;
+  ctx.shadowColor = 'rgba(255,107,157,0.65)';
   ctx.font = '500 46px "DM Sans", sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
