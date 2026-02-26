@@ -201,10 +201,10 @@ function playHeartbeat() {
 let lastHandSide = null;
 let isDown = false, downTime = 0;
 const HEART_COUNT = 20000;
-const HAND_MAP_X = 80;
-const HAND_MAP_Y = 60;
-const HAND_EFFECT = 0.65;
-const HAND_SMOOTH = 0.06;
+const HAND_MAP_X = 130;
+const HAND_MAP_Y = 100;
+const HAND_EFFECT = 1.1;
+const HAND_SMOOTH = 0.09;
 
 document.addEventListener('mousemove', e => {
   cursorEl.style.left = e.clientX + 'px';
@@ -282,7 +282,7 @@ function initThree() {
   isMobile = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
   camera = new THREE.PerspectiveCamera(68, innerWidth/innerHeight, 0.1, 1000);
   // Scale camera — mobile gets closer so heart is bigger (+40%)
-  const camZ = isMobile ? 20 : 24;
+  const camZ = isMobile ? 108 : 24;
   camera.position.z = camZ;
 
   renderer = new THREE.WebGLRenderer({
@@ -511,7 +511,7 @@ function buildPhotoMeshes() {
   urls.forEach((url, idx) => {
     makePolaroidTex(url, (tex, aspect) => {
       if (!tex) return;
-      const baseW = isMobile ? (5.5 + Math.random()*2)*2.2 : 5.5 + Math.random()*2;
+      const baseW = isMobile ? (5.5 + Math.random()*2)*1.7 : 5.5 + Math.random()*2;
       const w = baseW, h = baseW / (aspect || 0.82);
 
       const mesh = new THREE.Mesh(
@@ -824,7 +824,7 @@ window.addEventListener('resize', ()=>{
   camera.updateProjectionMatrix();
   renderer.setSize(innerWidth,innerHeight);
   // Re-scale camera distance on resize
-  camera.position.z = isMobile ? 20 : 24;
+  camera.position.z = isMobile ? 108 : 24;
 });
 
 // ─── Boot ─────────────────────────────────────────────────────────────────────
