@@ -211,10 +211,10 @@ function playHeartbeat() {
 let lastHandSide = null;
 let isDown = false, downTime = 0;
 const HEART_COUNT = ('ontouchstart' in window || navigator.maxTouchPoints > 0) ? 3000 : 18000;
-const HAND_MAP_X = 80;
-const HAND_MAP_Y = 60;
-const HAND_EFFECT = 0.65;
-const HAND_SMOOTH = 0.06;
+const HAND_MAP_X = 90;
+const HAND_MAP_Y = 70;
+const HAND_EFFECT = 1.0;
+const HAND_SMOOTH = 0.08;
 
 document.addEventListener('mousemove', e => {
   cursorEl.style.left = e.clientX + 'px';
@@ -662,8 +662,8 @@ async function initHands() {
       statusEl.style.color='#ffb3cc';
       statusEl.style.borderColor='rgba(255,107,157,.35)';
       const lm=res.multiHandLandmarks[0];
-      targetX+=((1-lm[9].x-.5)*HAND_MAP_X-targetX)*.2;
-      targetY+=((-lm[9].y+.5)*HAND_MAP_Y-targetY)*.2;
+      targetX+=((1-lm[9].x-.5)*HAND_MAP_X-targetX)*.3;
+      targetY+=((-lm[9].y+.5)*HAND_MAP_Y-targetY)*.3;
       const pinch=Math.hypot(lm[4].x-lm[8].x,lm[4].y-lm[8].y)<.055;
       const flip=lastHandSide!==null&&(lm[2].x>lm[17].x)!==lastHandSide;
       lastHandSide=lm[2].x>lm[17].x;
@@ -837,43 +837,45 @@ function animate(ts) {
       // assign orbit params once per explode (reset in toggleExplode)
       if (!ud.orbitR) {
         const total = photoMeshes.length;
-        // Spiral layers: spread photos in rings, each ring at different radius + height band
-        // This guarantees no 2 photos orbit the same path
-        const ring = Math.floor(idx / 8);          // 8 photos per ring layer
+        const ring = Math.floor(idx / 8);
         const posInRing = idx % 8;
         const rings = Math.ceil(total / 8);
 
-        // Each ring has different radius and height offset
-        const baseR   = 16;
-        const ringStep = 10;
-        ud.orbitR     = baseR + ring * ringStep + Math.random() * 3;
+        // Lớn hơn radius, bước ring lớn hơn để tách xa nhau
+        const baseR   = 18;
+        const ringStep = 14; // tăng từ 10 → 14
+        ud.orbitR = baseR + ring * ringStep + Math.random() * 2;
 
-        // Evenly space within ring, with small jitter
-        ud.orbitPhase = (posInRing / 8) * Math.PI * 2 + (Math.random()-0.5)*0.3;
-        // Alternate direction per ring
-        ud.orbitSpeed = (0.055 + Math.random()*0.07) * (ring%2===0 ? 1 : -1);
+        // Mỗi ảnh trong ring có phase đều đặn, ít jitter
+        ud.orbitPhase = (posInRing / 8) * Math.PI * 2 + (Math.random()-0.5)*0.15;
+        ud.orbitSpeed = (0.05 + Math.random()*0.05) * (ring%2===0 ? 1 : -1);
 
-        // Height: each ring is at a different vertical band
+        // Height band rộng hơn để ảnh trải đều theo chiều dọc
         const heightBand = (ring / Math.max(rings-1,1)) - 0.5;
-        ud.orbitHeightOffset = heightBand * 16;
-        ud.orbitTiltZ = (Math.random()-0.5) * 0.5;
-        ud.bobAmp     = 0.08 + Math.random()*0.15;
-        ud.bobSpeed   = 0.3 + Math.random()*0.4;
+        ud.orbitHeightOffset = heightBand * 22; // tăng từ 16 → 22
+
+        // Mỗi ảnh có Z depth riêng — tách lớp 3D tránh chồng khi nhìn thẳng
+        ud.orbitZOffset = (posInRing - 3.5) * 2.5;
+
+        ud.orbitTiltZ = (Math.random()-0.5) * 0.3;
+        ud.bobAmp     = 0.06 + Math.random()*0.10;
+        ud.bobSpeed   = 0.25 + Math.random()*0.35;
         ud.bobOffset  = Math.random()*Math.PI*2;
-        ud.tiltZ      = (Math.random()-0.5)*0.25;
-        ud.spinVel    = (Math.random()-0.5)*0.003;
+        ud.tiltZ      = (Math.random()-0.5)*0.22;
+        ud.spinVel    = (Math.random()-0.5)*0.002;
         ud.spinAccum  = 0;
       }
 
       const angle = time * ud.orbitSpeed + ud.orbitPhase;
-      const wx = handX*HAND_EFFECT*0.3, wy = handY*HAND_EFFECT*0.3;
+      const wx = handX*HAND_EFFECT*0.25, wy = handY*HAND_EFFECT*0.25;
 
       const tx = Math.cos(angle) * ud.orbitR + wx;
-      const ty = Math.sin(angle * 0.6 + ud.orbitTiltZ) * ud.orbitR * 0.35
-               + ud.orbitHeightOffset
+      const ty = ud.orbitHeightOffset
+               + Math.sin(angle * 0.5 + ud.orbitTiltZ) * ud.orbitR * 0.28
                + Math.sin(time * ud.bobSpeed + ud.bobOffset) * ud.bobAmp
                + wy;
-      const tz = Math.sin(angle) * ud.orbitR * 0.3 - 2;
+      // Z: orbit depth + per-photo offset để không đè lên nhau
+      const tz = Math.sin(angle) * ud.orbitR * 0.28 + ud.orbitZOffset - 2;
 
       m.position.x += (tx - m.position.x) * .038;
       m.position.y += (ty - m.position.y) * .038;
