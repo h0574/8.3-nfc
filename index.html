@@ -5,6 +5,12 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>8/3 — A10-K1 Special</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+// Fallback: if THREE not loaded from CDN, try jsdelivr
+if (typeof THREE === 'undefined') {
+  document.write('<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"><\/script>');
+}
+</script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -42,7 +48,8 @@
   .load-bar{height:100%;background:linear-gradient(90deg,#ffb3cc,#ff6b9d);
     width:0%;animation:prog 2.4s .8s var(--ease-smooth) forwards}
   .load-lbl{font-size:.68rem;letter-spacing:.35em;text-transform:uppercase;
-    color:rgba(255,255,255,.28);opacity:0;animation:up .6s .9s var(--ease-smooth) forwards}
+    color:rgba(255,255,255,.28);opacity:0;animation:up .6s .9s var(--ease-smooth) forwards;
+    transition:opacity .3s}
   @keyframes prog{to{width:100%}}
 
   #three-canvas{position:fixed;inset:0;display:block}
@@ -126,7 +133,7 @@
 <div id="loading">
   <div class="load-logo">8/3</div>
   <div class="load-bar-wrap"><div class="load-bar"></div></div>
-  <div class="load-lbl">Preparing something special</div>
+  <div class="load-lbl" id="load-lbl">Preparing something special</div>
 </div>
 
 <div class="ambient">
@@ -162,9 +169,12 @@
 const videoEl    = document.getElementById('webcam');
 const cursorEl   = document.getElementById('cursor');
 const loadingEl  = document.getElementById('loading');
+const loadLblEl  = document.getElementById('load-lbl');
 const bloomEl    = document.getElementById('bloom');
 const instPill   = document.getElementById('inst-pill');
 const heroTitle  = document.getElementById('hero-title');
+
+function setLoadStatus(txt) { if (loadLblEl) loadLblEl.textContent = txt; }
 
 let scene, camera, renderer;
 let heartSystem, textMeshes = [];
@@ -200,7 +210,7 @@ function playHeartbeat() {
 }
 let lastHandSide = null;
 let isDown = false, downTime = 0;
-const HEART_COUNT = ('ontouchstart' in window || navigator.maxTouchPoints > 0) ? 10000 : 20000;
+const HEART_COUNT = ('ontouchstart' in window || navigator.maxTouchPoints > 0) ? 4000 : 18000;
 const HAND_MAP_X = 80;
 const HAND_MAP_Y = 60;
 const HAND_EFFECT = 0.65;
@@ -304,10 +314,12 @@ function initThree() {
 
   renderer = new THREE.WebGLRenderer({
     canvas: document.getElementById('three-canvas'),
-    antialias: true, alpha: true
+    antialias: !isMobile,  // off on mobile = big GPU win
+    alpha: true,
+    powerPreference: 'high-performance'
   });
   renderer.setSize(innerWidth, innerHeight);
-  renderer.setPixelRatio(Math.min(devicePixelRatio, isMobile ? 1.5 : 2));
+  renderer.setPixelRatio(Math.min(devicePixelRatio, isMobile ? 1 : 2));
   renderer.setClearColor(0x000000, 0);
 
   if (!isMobile) {
@@ -319,7 +331,7 @@ function initThree() {
   }
 
   // Stars
-  const starCount = isMobile ? 3000 : 7000;
+  const starCount = isMobile ? 800 : 7000;
   const sg = new THREE.BufferGeometry();
   const sp = new Float32Array(starCount*3), ss = new Float32Array(starCount);
   for (let i=0;i<starCount;i++) {
@@ -525,7 +537,8 @@ function makePolaroidTex(imgUrl, callback) {
 
 // ─── Build Photo Meshes (Polaroid) ───────────────────────────────────────────
 function buildPhotoMeshes() {
-  const urls = photoUrls;
+  // Mobile: only show 20 photos to save memory + draw calls
+  const urls = isMobile ? photoUrls.slice(0, 20) : photoUrls;
   urls.forEach((url, idx) => {
     makePolaroidTex(url, (tex, aspect) => {
       if (!tex) return;
@@ -667,8 +680,13 @@ async function initHands() {
 }
 
 // ─── Animate ──────────────────────────────────────────────────────────────────
-function animate() {
+let _animLastT = 0;
+const _animInterval = ('ontouchstart' in window || navigator.maxTouchPoints > 0) ? 33 : 0;
+
+function animate(ts) {
   requestAnimationFrame(animate);
+  if (_animInterval && ts - _animLastT < _animInterval) return;
+  _animLastT = ts || 0;
   const time = performance.now()*.001;
 
   handX += (targetX-handX)*HAND_SMOOTH;
@@ -709,15 +727,19 @@ function animate() {
     const tgt  = heartSystem.geometry.attributes.target.array;
     const hOffX = isExploded ? handX*HAND_EFFECT : 0;
     const hOffY = isExploded ? handY*HAND_EFFECT : 0;
-    for (let j=0;j<HEART_COUNT*3;j++) {
-      let goal = isExploded ? tgt[j] : base[j];
-      const axis = j%3;
-      if (isExploded) {
-        if(axis===0) goal+=hOffX;
-        else if(axis===1) goal+=hOffY;
+
+    if (isExploded) {
+      // Exploded: lerp toward target + hand offset. No per-particle sin (too slow on mobile)
+      for (let j=0;j<HEART_COUNT*3;j+=3) {
+        pos[j]   += (tgt[j]  +hOffX - pos[j])  *lsp;
+        pos[j+1] += (tgt[j+1]+hOffY - pos[j+1])*lsp;
+        pos[j+2] += (tgt[j+2]       - pos[j+2])*lsp;
       }
-      const drift = isExploded ? Math.sin(time*.7+j*.0006)*.06 : 0;
-      pos[j] += (goal-pos[j])*lsp + drift;
+    } else {
+      // Closed: fast lerp back to base shape
+      for (let j=0;j<HEART_COUNT*3;j++) {
+        pos[j] += (base[j]-pos[j])*lsp;
+      }
     }
     heartSystem.geometry.attributes.position.needsUpdate = true;
   }
@@ -907,7 +929,7 @@ function resizeFX() {
 
 // Cherry blossoms
 const petals = [];
-const PETAL_COUNT = ('ontouchstart' in window || navigator.maxTouchPoints > 0) ? 25 : 55;
+const PETAL_COUNT = ('ontouchstart' in window || navigator.maxTouchPoints > 0) ? 8 : 55;
 function initPetals() {
   for (let i=0;i<PETAL_COUNT;i++) {
     petals.push({
@@ -941,7 +963,7 @@ function drawPetal(p) {
 
 // Mouse trail
 const trail = [];
-const TRAIL_MAX = 28;
+const TRAIL_MAX = ('ontouchstart' in window || navigator.maxTouchPoints > 0) ? 8 : 28;
 let mouseTrailX = -9999, mouseTrailY = -9999;
 let mouseHasMoved = false;
 window.addEventListener('mousemove', e => { mouseTrailX=e.clientX; mouseTrailY=e.clientY; mouseHasMoved=true; });
@@ -949,8 +971,13 @@ window.addEventListener('touchmove', e => {
   if(e.touches.length){ mouseTrailX=e.touches[0].clientX; mouseTrailY=e.touches[0].clientY; mouseHasMoved=true; }
 }, {passive:true});
 
-function animateFX() {
+let _fxLastT = 0;
+const _fxInterval = ('ontouchstart' in window || navigator.maxTouchPoints > 0) ? 33 : 0; // 30fps on mobile
+
+function animateFX(ts) {
   requestAnimationFrame(animateFX);
+  if (_fxInterval && ts - _fxLastT < _fxInterval) return;
+  _fxLastT = ts;
   fx.clearRect(0,0,fxW,fxH);
 
   // Trail — chỉ vẽ sau khi user thực sự di chuột
@@ -992,16 +1019,43 @@ function animateFX() {
   }
 }
 
-window.onload = () => {
-  resizeFX();
-  initPetals();
-  initThree();
-  buildPhotoMeshes();
-  animate();
-  animateFX();
-  initHands();
-  setTimeout(()=>{ loadingEl.classList.add('out'); setTimeout(()=>loadingEl.remove(),1300); }, 2800);
-};
+// Boot as soon as DOM + synchronous scripts ready — don't wait for images/CDN
+function bootApp() {
+  const forceHide = setTimeout(() => {
+    if (loadingEl) { loadingEl.classList.add('out'); setTimeout(() => { try { loadingEl.remove(); } catch(e){} }, 1300); }
+  }, 3000);
+
+  try {
+    setLoadStatus('Initializing canvas...');
+    resizeFX();
+    initPetals();
+    setLoadStatus('Building 3D scene...');
+    initThree();
+    setLoadStatus('Loading photos...');
+    buildPhotoMeshes();
+    animate();
+    animateFX();
+    initHands();
+  } catch(e) {
+    console.error('Init error:', e);
+    setLoadStatus('Error: ' + e.message);
+    clearTimeout(forceHide);
+    setTimeout(() => {
+      if (loadingEl) { loadingEl.classList.add('out'); setTimeout(() => { try { loadingEl.remove(); } catch(e2){} }, 800); }
+    }, 1500);
+  }
+}
+
+// Try immediately if THREE already loaded, else wait for it
+if (typeof THREE !== 'undefined') {
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', bootApp);
+  } else {
+    bootApp();
+  }
+} else {
+  window.addEventListener('load', bootApp);
+}
 
 window.addEventListener('resize', resizeFX);
 </script>
