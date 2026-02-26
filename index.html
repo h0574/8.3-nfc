@@ -203,8 +203,9 @@ function playHeartbeat() {
 }
 let lastHandSide = null;
 let isDown = false, downTime = 0;
-/* Dùng chung số lượng hạt tim như PC cho mọi thiết bị */
+/* Tổng hạt tim tối đa (PC). Mobile sẽ dùng ít hơn để đỡ lag. */
 const HEART_COUNT = 18000;
+let activeHeartCount = HEART_COUNT;
 const HAND_MAP_X = 90;
 const HAND_MAP_Y = 70;
 const HAND_EFFECT = 1.0;
@@ -285,6 +286,9 @@ function initThree() {
   scene = new THREE.Scene();
   isMobile = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
 
+  // Mobile: giảm số lượng tim để đỡ lag nhưng vẫn giữ shape & độ nét
+  activeHeartCount = isMobile ? 6000 : HEART_COUNT;
+
   // FOV fixed at 60° for consistent look on all devices
   const fov = 60;
   const aspect = innerWidth / innerHeight;
@@ -324,9 +328,8 @@ function initThree() {
     });
   }
 
-  // Stars
-  /* Dùng chung số lượng sao như PC */
-  const starCount = 7000;
+  // Stars: giảm số lượng trên mobile để nhẹ hơn
+  const starCount = isMobile ? 2200 : 7000;
   const sg = new THREE.BufferGeometry();
   const sp = new Float32Array(starCount*3), ss = new Float32Array(starCount);
   for (let i=0;i<starCount;i++) {
@@ -369,12 +372,12 @@ function initThree() {
 // ─── Heart System ─────────────────────────────────────────────────────────────
 function buildHeartSystem() {
   const geo = new THREE.BufferGeometry();
-  const pos=new Float32Array(HEART_COUNT*3), col=new Float32Array(HEART_COUNT*3);
-  const base=new Float32Array(HEART_COUNT*3), tgt=new Float32Array(HEART_COUNT*3);
-  const sz=new Float32Array(HEART_COUNT), rnd=new Float32Array(HEART_COUNT);
+  const pos=new Float32Array(activeHeartCount*3), col=new Float32Array(activeHeartCount*3);
+  const base=new Float32Array(activeHeartCount*3), tgt=new Float32Array(activeHeartCount*3);
+  const sz=new Float32Array(activeHeartCount), rnd=new Float32Array(activeHeartCount);
 
   let i=0;
-  while(i<HEART_COUNT){
+  while(i<activeHeartCount){
     const x=(Math.random()-.5)*3.2,y=(Math.random()-.5)*3.2,z=(Math.random()-.5)*3.2;
     const a=x*x+(9/4)*y*y+z*z-1;
     if(a*a*a-x*x*z*z*z-(9/80)*y*y*z*z*z<0){
@@ -485,6 +488,34 @@ const photoUrls = [
 
 let photoMeshes = [];
 
+// Biến theo dõi tiến độ load ảnh
+let photosExpected = 0;
+let photosLoaded = 0;
+let photosDone = false;
+
+function beginPhotoLoad(count) {
+  photosExpected = count;
+  photosLoaded = 0;
+  photosDone = false;
+}
+
+function markPhotoLoaded() {
+  if (photosDone) return;
+  photosLoaded++;
+  if (photosExpected && photosLoaded >= photosExpected) {
+    photosDone = true;
+    onAllPhotosReady();
+  }
+}
+
+function onAllPhotosReady() {
+  setLoadStatus('All photos loaded — ready!');
+  if (loadingEl) {
+    loadingEl.classList.add('out');
+    setTimeout(() => { try { loadingEl.remove(); } catch(e){} }, 1300);
+  }
+}
+
 // ─── Polaroid texture builder ─────────────────────────────────────────────────
 function makePolaroidTex(imgUrl, callback) {
   const img = new Image();
@@ -529,15 +560,21 @@ function makePolaroidTex(imgUrl, callback) {
     const tex = new THREE.CanvasTexture(cv);
     tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
     callback(tex, PW/PH);
+    markPhotoLoaded();
   };
-  img.onerror = () => { console.warn('❌ Failed:', imgUrl); callback(null); };
+  img.onerror = () => {
+    console.warn('❌ Failed:', imgUrl);
+    callback(null);
+    markPhotoLoaded();
+  };
   img.src = imgUrl;
 }
 
 // ─── Build Photo Meshes (Polaroid) ───────────────────────────────────────────
 function buildPhotoMeshes() {
-  // Dùng chung toàn bộ danh sách ảnh cho mọi thiết bị
-  const urls = photoUrls;
+  // PC: dùng toàn bộ ảnh, mobile: dùng bớt để nhẹ hơn (ảnh vẫn nét, chỉ ít tấm hơn)
+  const urls = isMobile ? photoUrls.slice(0, 24) : photoUrls;
+  beginPhotoLoad(urls.length);
   urls.forEach((url, idx) => {
     makePolaroidTex(url, (tex, aspect) => {
       if (!tex) return;
@@ -671,17 +708,18 @@ async function initHands() {
     statusEl.textContent='🖐 Chưa thấy tay';
     statusEl.style.color='rgba(255,255,255,.25)';
   } catch(e) {
-    statusEl.textContent='❌ Không có camera';
-    statusEl.style.color='rgba(255,100,100,.5)';
-    statusEl.style.borderColor='rgba(255,100,100,.2)';
+    // Khi không có camera hoặc người dùng chặn quyền truy cập
+    statusEl.textContent='🫶 Vui lòng bật quyền camera\nđể điều khiển trái tim bằng tay nhé!';
+    statusEl.style.color='#ffb3cc';
+    statusEl.style.borderColor='rgba(255,107,157,.4)';
     console.warn('Hand tracking unavailable',e);
   }
 }
 
 // ─── Animate ──────────────────────────────────────────────────────────────────
 let _animLastT = 0;
-// Không giảm fps cho mobile, dùng cùng tốc độ như PC
-const _animInterval = 0;
+// Mobile: giới hạn ~30fps cho nhẹ máy, PC vẫn full fps
+const _animInterval = ('ontouchstart' in window || navigator.maxTouchPoints > 0) ? 33 : 0;
 
 function animate(ts) {
   requestAnimationFrame(animate);
@@ -729,15 +767,15 @@ function animate(ts) {
     const hOffY = isExploded ? handY*HAND_EFFECT : 0;
 
     if (isExploded) {
-      // Exploded: lerp toward target + hand offset. No per-particle sin (too slow on mobile)
-      for (let j=0;j<HEART_COUNT*3;j+=3) {
+      // Exploded: lerp toward target + hand offset
+      for (let j=0;j<activeHeartCount*3;j+=3) {
         pos[j]   += (tgt[j]  +hOffX - pos[j])  *lsp;
         pos[j+1] += (tgt[j+1]+hOffY - pos[j+1])*lsp;
         pos[j+2] += (tgt[j+2]       - pos[j+2])*lsp;
       }
     } else {
       // Closed: fast lerp back to base shape
-      for (let j=0;j<HEART_COUNT*3;j++) {
+      for (let j=0;j<activeHeartCount*3;j++) {
         pos[j] += (base[j]-pos[j])*lsp;
       }
     }
@@ -931,8 +969,8 @@ function resizeFX() {
 
 // Cherry blossoms
 const petals = [];
-// Dùng chung số lượng cánh hoa như PC
-const PETAL_COUNT = 55;
+// Mobile: ít cánh hoa hơn, PC giữ nguyên
+const PETAL_COUNT = ('ontouchstart' in window || navigator.maxTouchPoints > 0) ? 12 : 55;
 function initPetals() {
   for (let i=0;i<PETAL_COUNT;i++) {
     petals.push({
@@ -966,8 +1004,8 @@ function drawPetal(p) {
 
 // Mouse trail
 const trail = [];
-// Dùng chung chiều dài trail như PC
-const TRAIL_MAX = 28;
+// Mobile: trail ngắn hơn, PC giữ nguyên
+const TRAIL_MAX = ('ontouchstart' in window || navigator.maxTouchPoints > 0) ? 10 : 28;
 let mouseTrailX = -9999, mouseTrailY = -9999;
 let mouseHasMoved = false;
 window.addEventListener('mousemove', e => { mouseTrailX=e.clientX; mouseTrailY=e.clientY; mouseHasMoved=true; });
@@ -976,8 +1014,8 @@ window.addEventListener('touchmove', e => {
 }, {passive:true});
 
 let _fxLastT = 0;
-// Không giới hạn fps hiệu ứng FX trên mobile
-const _fxInterval = 0;
+// Mobile: giới hạn ~30fps cho nhẹ máy, PC full fps
+const _fxInterval = ('ontouchstart' in window || navigator.maxTouchPoints > 0) ? 33 : 0;
 
 function animateFX(ts) {
   requestAnimationFrame(animateFX);
@@ -1024,12 +1062,8 @@ function animateFX(ts) {
   }
 }
 
-// Boot as soon as DOM + synchronous scripts ready — don't wait for images/CDN
+// Boot as soon as DOM + synchronous scripts ready — ảnh phải load xong mới cho vào
 function bootApp() {
-  const forceHide = setTimeout(() => {
-    if (loadingEl) { loadingEl.classList.add('out'); setTimeout(() => { try { loadingEl.remove(); } catch(e){} }, 1300); }
-  }, 3000);
-
   try {
     setLoadStatus('Initializing canvas...');
     resizeFX();
@@ -1038,15 +1072,27 @@ function bootApp() {
     initThree();
     setLoadStatus('Loading photos...');
     buildPhotoMeshes();
+    // Bắt đầu animation, nhưng vẫn giữ màn loading cho tới khi toàn bộ ảnh báo xong
     animate();
     animateFX();
     initHands();
+
+    // Phòng trường hợp CDN ảnh quá chậm hoặc lỗi mạng:
+    // nếu sau 15s vẫn chưa báo xong ảnh thì vẫn cho vào để không bị kẹt mãi.
+    setTimeout(() => {
+      if (!photosDone) {
+        console.warn('Photos still not fully loaded after timeout, continue anyway.');
+        onAllPhotosReady();
+      }
+    }, 15000);
   } catch(e) {
     console.error('Init error:', e);
     setLoadStatus('Error: ' + e.message);
-    clearTimeout(forceHide);
     setTimeout(() => {
-      if (loadingEl) { loadingEl.classList.add('out'); setTimeout(() => { try { loadingEl.remove(); } catch(e2){} }, 800); }
+      if (loadingEl) {
+        loadingEl.classList.add('out');
+        setTimeout(() => { try { loadingEl.remove(); } catch(e2){} }, 800);
+      }
     }, 1500);
   }
 }
