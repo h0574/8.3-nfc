@@ -210,7 +210,7 @@ function playHeartbeat() {
 }
 let lastHandSide = null;
 let isDown = false, downTime = 0;
-const HEART_COUNT = ('ontouchstart' in window || navigator.maxTouchPoints > 0) ? 4000 : 18000;
+const HEART_COUNT = ('ontouchstart' in window || navigator.maxTouchPoints > 0) ? 3000 : 18000;
 const HAND_MAP_X = 80;
 const HAND_MAP_Y = 60;
 const HAND_EFFECT = 0.65;
@@ -263,19 +263,19 @@ const msgs = [
 
 // ─── Text texture: gradient hồng ─────────────────────────────────────────────
 function makeTextTex(text) {
-  const W = 1024, H = 96;
+  const W = 2048, H = 160; // 2x resolution for Retina sharpness
   const cv = document.createElement('canvas');
   cv.width = W; cv.height = H;
   const ctx = cv.getContext('2d');
 
-  ctx.shadowBlur = 22;
+  ctx.shadowBlur = 36;
   ctx.shadowColor = 'rgba(255,107,157,0.65)';
-  ctx.font = '500 52px "DM Sans", sans-serif';
+  ctx.font = '500 88px "DM Sans", sans-serif'; // scaled 2x
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
 
   // Gradient trắng → hồng
-  const grad = ctx.createLinearGradient(0, 20, W, 76);
+  const grad = ctx.createLinearGradient(0, 30, W, 130);
   grad.addColorStop(0,   '#ffffff');
   grad.addColorStop(0.4, '#ffd6e8');
   grad.addColorStop(0.8, '#ff9ec4');
@@ -319,7 +319,7 @@ function initThree() {
     powerPreference: 'high-performance'
   });
   renderer.setSize(innerWidth, innerHeight);
-  renderer.setPixelRatio(Math.min(devicePixelRatio, isMobile ? 1 : 2));
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
   renderer.setClearColor(0x000000, 0);
 
   if (!isMobile) {
@@ -392,9 +392,10 @@ function buildHeartSystem() {
       tgt[i*3]=r*Math.sin(phi)*Math.cos(theta); tgt[i*3+1]=r*Math.sin(phi)*Math.sin(theta)*.7; tgt[i*3+2]=r*Math.cos(phi)*.5;
       rnd[i]=Math.random();
       const t=Math.random();
-      if(t>.88){col[i*3]=1;col[i*3+1]=.98;col[i*3+2]=1;sz[i]=.12+Math.random()*.12;}
-      else if(t>.5){col[i*3]=1;col[i*3+1]=.76+Math.random()*.15;col[i*3+2]=.85+Math.random()*.1;sz[i]=.05+Math.random()*.05;}
-      else{col[i*3]=1;col[i*3+1]=.52+Math.random()*.18;col[i*3+2]=.6+Math.random()*.2;sz[i]=.03+Math.random()*.04;}
+      const szMul = isMobile ? 1.8 : 1.0; // bigger particles on mobile to compensate fewer count
+      if(t>.88){col[i*3]=1;col[i*3+1]=.98;col[i*3+2]=1;sz[i]=(.12+Math.random()*.12)*szMul;}
+      else if(t>.5){col[i*3]=1;col[i*3+1]=.76+Math.random()*.15;col[i*3+2]=.85+Math.random()*.1;sz[i]=(.05+Math.random()*.05)*szMul;}
+      else{col[i*3]=1;col[i*3+1]=.52+Math.random()*.18;col[i*3+2]=.6+Math.random()*.2;sz[i]=(.03+Math.random()*.04)*szMul;}
       i++;
     }
   }
@@ -495,8 +496,9 @@ function makePolaroidTex(imgUrl, callback) {
   img.crossOrigin = 'anonymous';
   img.onload = () => {
     const aspect = img.width / img.height;
-    const IW = 400, IH = Math.round(400 / aspect);
-    const padSide = 20, padTop = 20, padBot = 62;
+    // 2x resolution for Retina sharpness
+    const IW = 800, IH = Math.round(800 / aspect);
+    const padSide = 40, padTop = 40, padBot = 120;
     const PW = IW + padSide*2, PH = IH + padTop + padBot;
     const cv = document.createElement('canvas');
     cv.width = PW; cv.height = PH;
@@ -504,9 +506,9 @@ function makePolaroidTex(imgUrl, callback) {
 
     // Drop shadow
     ctx.shadowColor = 'rgba(0,0,0,0.55)';
-    ctx.shadowBlur = 28;
-    ctx.shadowOffsetX = 2;
-    ctx.shadowOffsetY = 8;
+    ctx.shadowBlur = 56;
+    ctx.shadowOffsetX = 4;
+    ctx.shadowOffsetY = 16;
     ctx.fillStyle = '#ffffff';
     if (ctx.roundRect) ctx.roundRect(0, 0, PW, PH, 6);
     else { ctx.beginPath(); ctx.rect(0,0,PW,PH); }
@@ -529,7 +531,9 @@ function makePolaroidTex(imgUrl, callback) {
     ctx.fillStyle = vig;
     ctx.fillRect(padSide, padTop, IW, IH);
 
-    callback(new THREE.CanvasTexture(cv), PW/PH);
+    const tex = new THREE.CanvasTexture(cv);
+    tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    callback(tex, PW/PH);
   };
   img.onerror = () => { console.warn('❌ Failed:', imgUrl); callback(null); };
   img.src = imgUrl;
