@@ -281,8 +281,10 @@ function initThree() {
   scene = new THREE.Scene();
   isMobile = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
   camera = new THREE.PerspectiveCamera(68, innerWidth/innerHeight, 0.1, 1000);
-  // Scale camera distance based on screen width
-  const camZ = Math.max(24, 18 * (1200 / Math.max(innerWidth, 320)));
+  // Scale camera distance based on screen width - mobile needs more distance (heart smaller)
+  const camZ = isMobile
+    ? Math.max(42, 32 * (800 / Math.max(innerWidth, 320)))
+    : Math.max(24, 18 * (1200 / Math.max(innerWidth, 320)));
   camera.position.z = camZ;
 
   renderer = new THREE.WebGLRenderer({
@@ -510,7 +512,7 @@ function buildPhotoMeshes() {
   urls.forEach((url, idx) => {
     makePolaroidTex(url, (tex, aspect) => {
       if (!tex) return;
-      const baseW = isMobile ? 4.5 + Math.random()*1.5 : 5.5 + Math.random()*2;
+      const baseW = isMobile ? 3.0 + Math.random()*1.0 : 5.5 + Math.random()*2;
       const w = baseW, h = baseW / (aspect || 0.82);
 
       const mesh = new THREE.Mesh(
@@ -539,7 +541,7 @@ function buildPhotoMeshes() {
       if (!window._placedPhotoTargets) window._placedPhotoTargets = [];
       const placed = window._placedPhotoTargets;
       let angle = (idx/urls.length)*Math.PI*2;
-      let rr = isMobile ? 8+Math.random()*18 : 12+Math.random()*28;
+      let rr = isMobile ? 6+Math.random()*12 : 12+Math.random()*28;
       let tx, ty, tz, tries=0;
       while (tries<40) {
         const vAngle = (Math.random()-0.5)*Math.PI*0.8;
@@ -592,6 +594,7 @@ function toggleExplode() {
       const idx = i;
       let angle = (idx/urls.length)*Math.PI*2 + Math.random()*1.2;
       let rr = 12 + Math.random()*28;
+      if (isMobile) rr = 6 + Math.random()*12;
       let tx, ty, tz, tries=0;
       const placed = window._placedPhotoTargets;
       const w = m.geometry.parameters.width, h = m.geometry.parameters.height;
@@ -736,8 +739,8 @@ function animate() {
       m.position.z += (tgt.z    - m.position.z)*.06;
       m.lookAt(camera.position);
       m.material.opacity += (1-m.material.opacity)*.05;
-      m.position.y += Math.sin(time*.6+idx*.4)*.008;
-      m.position.x += Math.cos(time*.5+idx*.3)*.005;
+      m.position.y += Math.sin(time*.6+idx*.4)*.022;
+      m.position.x += Math.cos(time*.5+idx*.3)*.015;
     } else {
       m.material.opacity += (0-m.material.opacity)*.16;
       const hx=heartSystem.position.x, hy=heartSystem.position.y, hz=heartSystem.position.z;
@@ -794,9 +797,12 @@ function animate() {
 
       m.lookAt(camera.position);
       m.rotateZ(m.userData.tiltZ||0);
+      // Slow spin when floating
+      m.userData.spinZ = (m.userData.spinZ||0) + (m.userData.spinSpeed||((Math.random()-0.5)*0.0008));
+      m.userData.spinSpeed = m.userData.spinSpeed||((Math.random()-0.5)*0.0008);
 
-      m.position.y += Math.sin(time*.4+idx*.6)*.01;
-      m.position.x += Math.cos(time*.35+idx*.5)*.007;
+      m.position.y += Math.sin(time*.4+idx*.6)*.025;
+      m.position.x += Math.cos(time*.35+idx*.5)*.018;
 
       m.material.opacity += (0.93-m.material.opacity)*.04;
     } else {
@@ -823,7 +829,10 @@ window.addEventListener('resize', ()=>{
   camera.updateProjectionMatrix();
   renderer.setSize(innerWidth,innerHeight);
   // Re-scale camera distance on resize
-  camera.position.z = Math.max(24, 18 * (1200 / Math.max(innerWidth, 320)));
+  const mob = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
+  camera.position.z = mob
+    ? Math.max(42, 32 * (800 / Math.max(innerWidth, 320)))
+    : Math.max(24, 18 * (1200 / Math.max(innerWidth, 320)));
 });
 
 // ─── Boot ─────────────────────────────────────────────────────────────────────
