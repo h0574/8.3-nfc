@@ -116,14 +116,7 @@ if (typeof THREE === 'undefined') {
   @keyframes hbeat{0%,100%{transform:scale(1)}14%{transform:scale(1.06)}28%{transform:scale(1)}42%{transform:scale(1.04)}70%{transform:scale(1)}}
   .beating{animation:hbeat 1.2s ease-in-out infinite;display:inline-block}
 
-  @media (max-width: 480px) {
-    #hero { padding: 16px 16px 0 !important; }
-    .eyebrow { font-size:.5rem; letter-spacing:.2em; margin-bottom:6px; }
-    .hero-title { font-size:clamp(1.9rem,7.5vw,2.6rem) !important; line-height:1.06; }
-    .hero-sub { font-size:.75rem; margin-top:6px; }
-    .pill { font-size:.64rem; padding:5px 12px; margin-top:12px; }
-    .inst-pill { font-size:.68rem !important; padding:9px 16px !important; }
-  }
+  /* Giữ giao diện desktop cho cả PC & mobile nên bỏ thu nhỏ trên màn hình nhỏ */
 </style>
 </head>
 <body>
@@ -210,7 +203,8 @@ function playHeartbeat() {
 }
 let lastHandSide = null;
 let isDown = false, downTime = 0;
-const HEART_COUNT = ('ontouchstart' in window || navigator.maxTouchPoints > 0) ? 3000 : 18000;
+/* Dùng chung số lượng hạt tim như PC cho mọi thiết bị */
+const HEART_COUNT = 18000;
 const HAND_MAP_X = 90;
 const HAND_MAP_Y = 70;
 const HAND_EFFECT = 1.0;
@@ -314,7 +308,7 @@ function initThree() {
 
   renderer = new THREE.WebGLRenderer({
     canvas: document.getElementById('three-canvas'),
-    antialias: !isMobile,  // off on mobile = big GPU win
+    antialias: true, // luôn bật antialias để giao diện giống nhau
     alpha: true,
     powerPreference: 'high-performance'
   });
@@ -331,7 +325,8 @@ function initThree() {
   }
 
   // Stars
-  const starCount = isMobile ? 800 : 7000;
+  /* Dùng chung số lượng sao như PC */
+  const starCount = 7000;
   const sg = new THREE.BufferGeometry();
   const sp = new Float32Array(starCount*3), ss = new Float32Array(starCount);
   for (let i=0;i<starCount;i++) {
@@ -541,8 +536,8 @@ function makePolaroidTex(imgUrl, callback) {
 
 // ─── Build Photo Meshes (Polaroid) ───────────────────────────────────────────
 function buildPhotoMeshes() {
-  // Mobile: only show 20 photos to save memory + draw calls
-  const urls = isMobile ? photoUrls.slice(0, 20) : photoUrls;
+  // Dùng chung toàn bộ danh sách ảnh cho mọi thiết bị
+  const urls = photoUrls;
   urls.forEach((url, idx) => {
     makePolaroidTex(url, (tex, aspect) => {
       if (!tex) return;
@@ -685,7 +680,8 @@ async function initHands() {
 
 // ─── Animate ──────────────────────────────────────────────────────────────────
 let _animLastT = 0;
-const _animInterval = ('ontouchstart' in window || navigator.maxTouchPoints > 0) ? 33 : 0;
+// Không giảm fps cho mobile, dùng cùng tốc độ như PC
+const _animInterval = 0;
 
 function animate(ts) {
   requestAnimationFrame(animate);
@@ -935,7 +931,8 @@ function resizeFX() {
 
 // Cherry blossoms
 const petals = [];
-const PETAL_COUNT = ('ontouchstart' in window || navigator.maxTouchPoints > 0) ? 8 : 55;
+// Dùng chung số lượng cánh hoa như PC
+const PETAL_COUNT = 55;
 function initPetals() {
   for (let i=0;i<PETAL_COUNT;i++) {
     petals.push({
@@ -969,7 +966,8 @@ function drawPetal(p) {
 
 // Mouse trail
 const trail = [];
-const TRAIL_MAX = ('ontouchstart' in window || navigator.maxTouchPoints > 0) ? 8 : 28;
+// Dùng chung chiều dài trail như PC
+const TRAIL_MAX = 28;
 let mouseTrailX = -9999, mouseTrailY = -9999;
 let mouseHasMoved = false;
 window.addEventListener('mousemove', e => { mouseTrailX=e.clientX; mouseTrailY=e.clientY; mouseHasMoved=true; });
@@ -978,7 +976,8 @@ window.addEventListener('touchmove', e => {
 }, {passive:true});
 
 let _fxLastT = 0;
-const _fxInterval = ('ontouchstart' in window || navigator.maxTouchPoints > 0) ? 33 : 0; // 30fps on mobile
+// Không giới hạn fps hiệu ứng FX trên mobile
+const _fxInterval = 0;
 
 function animateFX(ts) {
   requestAnimationFrame(animateFX);
