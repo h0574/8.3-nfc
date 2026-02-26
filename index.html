@@ -281,8 +281,8 @@ function initThree() {
   scene = new THREE.Scene();
   isMobile = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
   camera = new THREE.PerspectiveCamera(68, innerWidth/innerHeight, 0.1, 1000);
-  // Scale camera distance based on screen width
-  const camZ = Math.max(24, 18 * (1200 / Math.max(innerWidth, 320)));
+  // Scale camera — mobile gets closer so heart is bigger (+40%)
+  const camZ = isMobile ? 20 : 24;
   camera.position.z = camZ;
 
   renderer = new THREE.WebGLRenderer({
@@ -393,7 +393,8 @@ function buildHeartSystem() {
 function buildTextMeshes() {
   msgs.forEach((txt, idx) => {
     const tex = makeTextTex(txt);
-    const w = 10 + Math.random()*4;
+    const wBase = isMobile ? (10 + Math.random()*4)*2.2 : (10 + Math.random()*4);
+    const w = wBase;
     const mesh = new THREE.Mesh(
       new THREE.PlaneGeometry(w, w*0.092),
       new THREE.MeshBasicMaterial({map:tex,transparent:true,opacity:0,side:THREE.DoubleSide,depthWrite:false})
@@ -510,7 +511,7 @@ function buildPhotoMeshes() {
   urls.forEach((url, idx) => {
     makePolaroidTex(url, (tex, aspect) => {
       if (!tex) return;
-      const baseW = isMobile ? 4.5 + Math.random()*1.5 : 5.5 + Math.random()*2;
+      const baseW = isMobile ? (5.5 + Math.random()*2)*2.2 : 5.5 + Math.random()*2;
       const w = baseW, h = baseW / (aspect || 0.82);
 
       const mesh = new THREE.Mesh(
@@ -823,7 +824,7 @@ window.addEventListener('resize', ()=>{
   camera.updateProjectionMatrix();
   renderer.setSize(innerWidth,innerHeight);
   // Re-scale camera distance on resize
-  camera.position.z = Math.max(24, 18 * (1200 / Math.max(innerWidth, 320)));
+  camera.position.z = isMobile ? 20 : 24;
 });
 
 // ─── Boot ─────────────────────────────────────────────────────────────────────
