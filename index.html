@@ -5,12 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>8/3 — A10-K1 Special</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-<script>
-// Fallback: if THREE not loaded from CDN, try jsdelivr
-if (typeof THREE === 'undefined') {
-  document.write('<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"><\/script>');
-}
-</script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -48,8 +42,7 @@ if (typeof THREE === 'undefined') {
   .load-bar{height:100%;background:linear-gradient(90deg,#ffb3cc,#ff6b9d);
     width:0%;animation:prog 2.4s .8s var(--ease-smooth) forwards}
   .load-lbl{font-size:.68rem;letter-spacing:.35em;text-transform:uppercase;
-    color:rgba(255,255,255,.28);opacity:0;animation:up .6s .9s var(--ease-smooth) forwards;
-    transition:opacity .3s}
+    color:rgba(255,255,255,.28);opacity:0;animation:up .6s .9s var(--ease-smooth) forwards}
   @keyframes prog{to{width:100%}}
 
   #three-canvas{position:fixed;inset:0;display:block}
@@ -116,7 +109,14 @@ if (typeof THREE === 'undefined') {
   @keyframes hbeat{0%,100%{transform:scale(1)}14%{transform:scale(1.06)}28%{transform:scale(1)}42%{transform:scale(1.04)}70%{transform:scale(1)}}
   .beating{animation:hbeat 1.2s ease-in-out infinite;display:inline-block}
 
-  /* Giữ giao diện desktop cho cả PC & mobile nên bỏ thu nhỏ trên màn hình nhỏ */
+  @media (max-width: 480px) {
+    #hero { padding: 16px 16px 0 !important; }
+    .eyebrow { font-size:.5rem; letter-spacing:.2em; margin-bottom:6px; }
+    .hero-title { font-size:clamp(1.9rem,7.5vw,2.6rem) !important; line-height:1.06; }
+    .hero-sub { font-size:.75rem; margin-top:6px; }
+    .pill { font-size:.64rem; padding:5px 12px; margin-top:12px; }
+    .inst-pill { font-size:.68rem !important; padding:9px 16px !important; }
+  }
 </style>
 </head>
 <body>
@@ -126,7 +126,7 @@ if (typeof THREE === 'undefined') {
 <div id="loading">
   <div class="load-logo">8/3</div>
   <div class="load-bar-wrap"><div class="load-bar"></div></div>
-  <div class="load-lbl" id="load-lbl">Preparing something special</div>
+  <div class="load-lbl">Preparing something special</div>
 </div>
 
 <div class="ambient">
@@ -162,12 +162,9 @@ if (typeof THREE === 'undefined') {
 const videoEl    = document.getElementById('webcam');
 const cursorEl   = document.getElementById('cursor');
 const loadingEl  = document.getElementById('loading');
-const loadLblEl  = document.getElementById('load-lbl');
 const bloomEl    = document.getElementById('bloom');
 const instPill   = document.getElementById('inst-pill');
 const heroTitle  = document.getElementById('hero-title');
-
-function setLoadStatus(txt) { if (loadLblEl) loadLblEl.textContent = txt; }
 
 let scene, camera, renderer;
 let heartSystem, textMeshes = [];
@@ -203,13 +200,11 @@ function playHeartbeat() {
 }
 let lastHandSide = null;
 let isDown = false, downTime = 0;
-/* Tổng hạt tim tối đa (PC). Mobile sẽ dùng ít hơn để đỡ lag. */
-const HEART_COUNT = 18000;
-let activeHeartCount = HEART_COUNT;
-const HAND_MAP_X = 90;
-const HAND_MAP_Y = 70;
-const HAND_EFFECT = 1.0;
-const HAND_SMOOTH = 0.08;
+const HEART_COUNT = 20000;
+const HAND_MAP_X = 130;
+const HAND_MAP_Y = 100;
+const HAND_EFFECT = 1.1;
+const HAND_SMOOTH = 0.09;
 
 document.addEventListener('mousemove', e => {
   cursorEl.style.left = e.clientX + 'px';
@@ -258,19 +253,19 @@ const msgs = [
 
 // ─── Text texture: gradient hồng ─────────────────────────────────────────────
 function makeTextTex(text) {
-  const W = 2048, H = 160; // 2x resolution for Retina sharpness
+  const W = 1024, H = 96;
   const cv = document.createElement('canvas');
   cv.width = W; cv.height = H;
   const ctx = cv.getContext('2d');
 
-  ctx.shadowBlur = 36;
+  ctx.shadowBlur = 22;
   ctx.shadowColor = 'rgba(255,107,157,0.65)';
-  ctx.font = '500 88px "DM Sans", sans-serif'; // scaled 2x
+  ctx.font = '500 46px "DM Sans", sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
 
   // Gradient trắng → hồng
-  const grad = ctx.createLinearGradient(0, 30, W, 130);
+  const grad = ctx.createLinearGradient(0, 20, W, 76);
   grad.addColorStop(0,   '#ffffff');
   grad.addColorStop(0.4, '#ffd6e8');
   grad.addColorStop(0.8, '#ff9ec4');
@@ -285,36 +280,14 @@ function makeTextTex(text) {
 function initThree() {
   scene = new THREE.Scene();
   isMobile = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
-
-  // Mobile: giảm số lượng tim để đỡ lag nhưng vẫn giữ shape & độ nét
-  activeHeartCount = isMobile ? 6000 : HEART_COUNT;
-
-  // FOV fixed at 60° for consistent look on all devices
-  const fov = 60;
-  const aspect = innerWidth / innerHeight;
-  camera = new THREE.PerspectiveCamera(fov, aspect, 0.1, 1000);
-
-  // Heart world-space half-height ≈ 13 units (sc=13).
-  // We want the heart to fill ~55% of screen height.
-  // visibleHeight = 2 * camZ * tan(fov/2)
-  // heartHeight(13) / visibleHeight = 0.55  →  camZ = 13 / (0.55 * tan(30°)) ≈ 40.7
-  // But on portrait mobile the width is the constraint, so we also check width:
-  // visibleWidth = visibleHeight * aspect
-  // We pick the camZ that satisfies BOTH (heart fits in 80% width AND 55% height)
-  const heartHalfH = 13; // world units, matches sc=13
-  const tanHalfFov = Math.tan((fov / 2) * Math.PI / 180);
-  // On portrait (mobile): height drives the view → heart fills ~52% of screen height
-  // On landscape (desktop): use the tighter of height or width constraint
-  const isPortrait = innerHeight > innerWidth;
-  const camZByHeight = heartHalfH / (0.52 * tanHalfFov);
-  const camZByWidth  = heartHalfH / (0.40 * tanHalfFov * aspect);
-  camera.position.z = isPortrait ? camZByHeight : Math.max(camZByHeight, camZByWidth);
+  camera = new THREE.PerspectiveCamera(68, innerWidth/innerHeight, 0.1, 1000);
+  // Scale camera — mobile gets closer so heart is bigger (+40%)
+  const camZ = isMobile ? 108 : 24;
+  camera.position.z = camZ;
 
   renderer = new THREE.WebGLRenderer({
     canvas: document.getElementById('three-canvas'),
-    antialias: true, // luôn bật antialias để giao diện giống nhau
-    alpha: true,
-    powerPreference: 'high-performance'
+    antialias: true, alpha: true
   });
   renderer.setSize(innerWidth, innerHeight);
   renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
@@ -328,11 +301,10 @@ function initThree() {
     });
   }
 
-  // Stars: giảm số lượng trên mobile để nhẹ hơn
-  const starCount = isMobile ? 2200 : 7000;
+  // Stars
   const sg = new THREE.BufferGeometry();
-  const sp = new Float32Array(starCount*3), ss = new Float32Array(starCount);
-  for (let i=0;i<starCount;i++) {
+  const sp = new Float32Array(7000*3), ss = new Float32Array(7000);
+  for (let i=0;i<7000;i++) {
     sp[i*3]=(Math.random()-.5)*400; sp[i*3+1]=(Math.random()-.5)*400; sp[i*3+2]=-120+Math.random()*90;
     ss[i]=.04+Math.random()*.1;
   }
@@ -372,17 +344,16 @@ function initThree() {
 // ─── Heart System ─────────────────────────────────────────────────────────────
 function buildHeartSystem() {
   const geo = new THREE.BufferGeometry();
-  const pos=new Float32Array(activeHeartCount*3), col=new Float32Array(activeHeartCount*3);
-  const base=new Float32Array(activeHeartCount*3), tgt=new Float32Array(activeHeartCount*3);
-  const sz=new Float32Array(activeHeartCount), rnd=new Float32Array(activeHeartCount);
+  const pos=new Float32Array(HEART_COUNT*3), col=new Float32Array(HEART_COUNT*3);
+  const base=new Float32Array(HEART_COUNT*3), tgt=new Float32Array(HEART_COUNT*3);
+  const sz=new Float32Array(HEART_COUNT), rnd=new Float32Array(HEART_COUNT);
 
   let i=0;
-  while(i<activeHeartCount){
+  while(i<HEART_COUNT){
     const x=(Math.random()-.5)*3.2,y=(Math.random()-.5)*3.2,z=(Math.random()-.5)*3.2;
     const a=x*x+(9/4)*y*y+z*z-1;
     if(a*a*a-x*x*z*z*z-(9/80)*y*y*z*z*z<0){
-      // sc=13: heart world half-height. Camera auto-adjusts via aspect formula.
-      const sc = 13;
+      const sc=9;
       base[i*3]=x*sc; base[i*3+1]=z*sc+1.8; base[i*3+2]=y*sc;
       pos[i*3]=base[i*3]; pos[i*3+1]=base[i*3+1]; pos[i*3+2]=base[i*3+2];
       const phi=Math.acos(2*Math.random()-1), theta=Math.random()*Math.PI*2;
@@ -390,10 +361,9 @@ function buildHeartSystem() {
       tgt[i*3]=r*Math.sin(phi)*Math.cos(theta); tgt[i*3+1]=r*Math.sin(phi)*Math.sin(theta)*.7; tgt[i*3+2]=r*Math.cos(phi)*.5;
       rnd[i]=Math.random();
       const t=Math.random();
-      const szMul = isMobile ? 1.8 : 1.0; // bigger particles on mobile to compensate fewer count
-      if(t>.88){col[i*3]=1;col[i*3+1]=.98;col[i*3+2]=1;sz[i]=(.12+Math.random()*.12)*szMul;}
-      else if(t>.5){col[i*3]=1;col[i*3+1]=.76+Math.random()*.15;col[i*3+2]=.85+Math.random()*.1;sz[i]=(.05+Math.random()*.05)*szMul;}
-      else{col[i*3]=1;col[i*3+1]=.52+Math.random()*.18;col[i*3+2]=.6+Math.random()*.2;sz[i]=(.03+Math.random()*.04)*szMul;}
+      if(t>.88){col[i*3]=1;col[i*3+1]=.98;col[i*3+2]=1;sz[i]=.12+Math.random()*.12;}
+      else if(t>.5){col[i*3]=1;col[i*3+1]=.76+Math.random()*.15;col[i*3+2]=.85+Math.random()*.1;sz[i]=.05+Math.random()*.05;}
+      else{col[i*3]=1;col[i*3+1]=.52+Math.random()*.18;col[i*3+2]=.6+Math.random()*.2;sz[i]=.03+Math.random()*.04;}
       i++;
     }
   }
@@ -423,7 +393,8 @@ function buildHeartSystem() {
 function buildTextMeshes() {
   msgs.forEach((txt, idx) => {
     const tex = makeTextTex(txt);
-    const w = 9 + Math.random()*3;
+    const wBase = isMobile ? (10 + Math.random()*4)*2.2 : (10 + Math.random()*4);
+    const w = wBase;
     const mesh = new THREE.Mesh(
       new THREE.PlaneGeometry(w, w*0.092),
       new THREE.MeshBasicMaterial({map:tex,transparent:true,opacity:0,side:THREE.DoubleSide,depthWrite:false})
@@ -445,76 +416,41 @@ function buildTextMeshes() {
 
 // ─── Photo URLs ───────────────────────────────────────────────────────────────
 const photoUrls = [
-  "https://i.ibb.co/HD3tF6Ry/586842180-122195323730326452-6389351653584219824-n.jpg",
-  "https://i.ibb.co/Z6xRY4dn/586582619-122195423120326452-1426713942701089678-n.jpg",
-  "https://i.ibb.co/7Jj2TNT6/586210755-122195323838326452-6727449979373333836-n.jpg",
-  "https://i.ibb.co/B2F3FjdN/565188825-122191399268326452-156843864060431274-n.jpg",
-  "https://i.ibb.co/KjtWTWDQ/586057407-122195323898326452-6048508443298677119-n.jpg",
-  "https://i.ibb.co/21PPpS62/z7564230212523-b11f36cd3eec5d0b8abb797ff5ea48dc.jpg",
-  "https://i.ibb.co/MyRvKS38/z7564230204228-0aa0bb93cad257b56b76eec047e9249a.jpg",
-  "https://i.ibb.co/YCWs41b/z7564230197610-a77ce04e0dcae79b0aed5dbcafed7d6d.jpg",
-  "https://i.ibb.co/Q3ZRjLSP/z7564230166197-8b3ac985b553164fa2b271bcc596022e.jpg",
-  "https://i.ibb.co/Jwj9kT9q/z7564230145985-f52ad6f969c9824d4e67393e68f66095.jpg",
-  "https://i.ibb.co/WNMsYs9c/z7564230141265-8aaa68d20cb53c3c530059282dc9d3b1.jpg",
-  "https://i.ibb.co/SXvd9zFJ/z7564230139541-fd9a5e3af54346c7cb3567067f0def26.jpg",
-  "https://i.ibb.co/6Jn0ryBQ/z7564230129020-33f1691ad10a5daf583bcc45693ef11a.jpg",
-  "https://i.ibb.co/LXbNSwJc/z7564230083133-018b40c4ac3b5017ccda8af8d1415816.jpg",
-  "https://i.ibb.co/V7fY7wK/z7564230078218-1e8ae707c2d4ea8608c96bc5dc8a1e72.jpg",
-  "https://i.ibb.co/2YY2QWR6/z7564230025251-30db95a63656705e42991a6608690af0.jpg",
-  "https://i.ibb.co/wrKNRgzK/z7564230023743-9a48ca9441bb90bb6bb04cee691b656e.jpg",
-  "https://i.ibb.co/ycZt0PbS/z7564229979475-e1327d3ebccfdf5cda148e27f452c092.jpg",
-  "https://i.ibb.co/Xx1kXXP5/z7564229937497-bdee1106e42b721eb82b5090a0cb1aa8.jpg",
-  "https://i.ibb.co/CKNPwv7b/z7564229912629-c064668c882f0c3547a09d90be98ee66.jpg",
-  "https://i.ibb.co/27PX1VrF/z7564229907687-12a04e91b6bb0e9e49f2943d99e0cacf.jpg",
-  "https://i.ibb.co/twrMm55k/z7564229890662-6b3cd073b15d4cb6db0b62367b2676b0.jpg",
-  "https://i.ibb.co/mr5Nr3fX/z7564229860903-a8431415450bf7bec8e5c03b48b4bc56.jpg",
-  "https://i.ibb.co/nMt9GB0D/z7564229819117-c86145d6ad88b553f0aff022c1652164.jpg",
-  "https://i.ibb.co/JFMMhhXb/z7564229798337-de3deece209243dc54f5de712684a510.jpg",
-  "https://i.ibb.co/CpDdXhCQ/z7564229786406-a5754a3b0ea1e8c69900ee5dd107f8e7.jpg",
-  "https://i.ibb.co/TBLH99T8/z7564229762819-502bdfa0ce847f72b357bf9deb5a430f.jpg",
-  "https://i.ibb.co/d0cjW2JN/z7564229781889-8ade91b9b3004acf667f22d87b039deb.jpg",
-  "https://i.ibb.co/xq8nxbyp/z7564229687840-050ebf0024b9d903664b46ea9654773a.jpg",
-  "https://i.ibb.co/Y4r1NGRX/z7564229659382-d4feddc50202a7797846822ebcc899c8.jpg",
-  "https://i.ibb.co/QFvfcx4W/z7564229618342-6995bfc2ea1afa12b81a00c90652f872.jpg",
-  "https://i.ibb.co/zTpMkwrj/z7564229585751-203f2218308b13a1fe6a478725482088.jpg",
-  "https://i.ibb.co/TqHfzMd8/z7564229578371-3c8dac476685825a9af355201f4ad10c.jpg",
-  "https://i.ibb.co/CsB0jXzD/z7564229577182-459563c803e3c16578c3e98e7129f719.jpg",
-  "https://i.ibb.co/V0gmPjhx/z7564229570534-217aef712a1039ba5f153c55f87fec8b.jpg",
-  "https://i.ibb.co/DTbB7nz/z7564229486712-4ce51854a5eabe7db8c2e1abe4fc0867.jpg",
-  "https://i.ibb.co/mVVbZDFC/z7564229484651-54c2c5abeb1d84b942bda8a83578c561.jpg",
-  "https://i.ibb.co/nNSZNmj8/z7564229472321-7b7dbad39149295af21d5158c476e222.jpg",
-  "https://i.ibb.co/4R44fdsf/z7564229445487-3f59b51bbec0aa70e83514684c5d6ba3.jpg",
+  "https://res.cloudinary.com/dzvflvhwy/image/upload/v1772381678/31anh_onzwye.jpg",
+  "https://res.cloudinary.com/dzvflvhwy/image/upload/v1772381678/32anh_gcw6za.jpg",
+  "https://res.cloudinary.com/dzvflvhwy/image/upload/v1772381678/30anh_ru96jq.jpg",
+  "https://res.cloudinary.com/dzvflvhwy/image/upload/v1772381678/29anh_akauje.jpg",
+  "https://res.cloudinary.com/dzvflvhwy/image/upload/v1772381677/28anh_juyzfm.jpg",
+  "https://res.cloudinary.com/dzvflvhwy/image/upload/v1772381677/26anh_n5ay2o.jpg",
+  "https://res.cloudinary.com/dzvflvhwy/image/upload/v1772381677/23anh_nza579.jpg",
+  "https://res.cloudinary.com/dzvflvhwy/image/upload/v1772381677/27anh_rv5hb1.jpg",
+  "https://res.cloudinary.com/dzvflvhwy/image/upload/v1772381677/25anh_ncygsi.jpg",
+  "https://res.cloudinary.com/dzvflvhwy/image/upload/v1772381677/24anh_kd1fc6.jpg",
+  "https://res.cloudinary.com/dzvflvhwy/image/upload/v1772381676/22anh_yil07d.jpg",
+  "https://res.cloudinary.com/dzvflvhwy/image/upload/v1772381676/21anh_hyt18k.jpg",
+  "https://res.cloudinary.com/dzvflvhwy/image/upload/v1772381676/20anh_nln9ev.jpg",
+  "https://res.cloudinary.com/dzvflvhwy/image/upload/v1772381676/19anh_hld7dh.jpg",
+  "https://res.cloudinary.com/dzvflvhwy/image/upload/v1772381675/18anh_dbe0oc.jpg",
+  "https://res.cloudinary.com/dzvflvhwy/image/upload/v1772381674/14anh_wah8fc.jpg",
+  "https://res.cloudinary.com/dzvflvhwy/image/upload/v1772381675/17anh_tuac86.jpg",
+  "https://res.cloudinary.com/dzvflvhwy/image/upload/v1772381675/13anh_axtq2m.jpg",
+  "https://res.cloudinary.com/dzvflvhwy/image/upload/v1772381675/15anh_bvfj2y.jpg",
+  "https://res.cloudinary.com/dzvflvhwy/image/upload/v1772381675/16anh_cr25je.jpg",
+  "https://res.cloudinary.com/dzvflvhwy/image/upload/v1772381674/7anh_dhewt2.jpg",
+  "https://res.cloudinary.com/dzvflvhwy/image/upload/v1772381674/12anh_rxa5d5.jpg",
+  "https://res.cloudinary.com/dzvflvhwy/image/upload/v1772381673/10anh_rcwjup.jpg",
+  "https://res.cloudinary.com/dzvflvhwy/image/upload/v1772381674/8anh_nxihy3.jpg",
+  "https://res.cloudinary.com/dzvflvhwy/image/upload/v1772381674/9anh_hfo7au.jpg",
+  "https://res.cloudinary.com/dzvflvhwy/image/upload/v1772381674/11anh_kz30xj.jpg",
+  "https://res.cloudinary.com/dzvflvhwy/image/upload/v1772381673/4anh_uykjtt.jpg",
+  "https://res.cloudinary.com/dzvflvhwy/image/upload/v1772381672/5anh_o7lyej.jpg",
+  "https://res.cloudinary.com/dzvflvhwy/image/upload/v1772381672/3anh_bsw0yh.jpg",
+  "https://res.cloudinary.com/dzvflvhwy/image/upload/v1772381672/6anh_ms4rg6.jpg",
+  "https://res.cloudinary.com/dzvflvhwy/image/upload/v1772381672/1anh_h9ykkk.jpg",
+  "https://res.cloudinary.com/dzvflvhwy/image/upload/v1772381672/2anh_h6koct.jpg",
 ];
 
 let photoMeshes = [];
-
-// Biến theo dõi tiến độ load ảnh
-let photosExpected = 0;
-let photosLoaded = 0;
-let photosDone = false;
-
-function beginPhotoLoad(count) {
-  photosExpected = count;
-  photosLoaded = 0;
-  photosDone = false;
-}
-
-function markPhotoLoaded() {
-  if (photosDone) return;
-  photosLoaded++;
-  if (photosExpected && photosLoaded >= photosExpected) {
-    photosDone = true;
-    onAllPhotosReady();
-  }
-}
-
-function onAllPhotosReady() {
-  setLoadStatus('All photos loaded — ready!');
-  if (loadingEl) {
-    loadingEl.classList.add('out');
-    setTimeout(() => { try { loadingEl.remove(); } catch(e){} }, 1300);
-  }
-}
 
 // ─── Polaroid texture builder ─────────────────────────────────────────────────
 function makePolaroidTex(imgUrl, callback) {
@@ -522,9 +458,8 @@ function makePolaroidTex(imgUrl, callback) {
   img.crossOrigin = 'anonymous';
   img.onload = () => {
     const aspect = img.width / img.height;
-    // 2x resolution for Retina sharpness
-    const IW = 800, IH = Math.round(800 / aspect);
-    const padSide = 40, padTop = 40, padBot = 120;
+    const IW = 400, IH = Math.round(400 / aspect);
+    const padSide = 20, padTop = 20, padBot = 62;
     const PW = IW + padSide*2, PH = IH + padTop + padBot;
     const cv = document.createElement('canvas');
     cv.width = PW; cv.height = PH;
@@ -532,9 +467,9 @@ function makePolaroidTex(imgUrl, callback) {
 
     // Drop shadow
     ctx.shadowColor = 'rgba(0,0,0,0.55)';
-    ctx.shadowBlur = 56;
-    ctx.shadowOffsetX = 4;
-    ctx.shadowOffsetY = 16;
+    ctx.shadowBlur = 28;
+    ctx.shadowOffsetX = 2;
+    ctx.shadowOffsetY = 8;
     ctx.fillStyle = '#ffffff';
     if (ctx.roundRect) ctx.roundRect(0, 0, PW, PH, 6);
     else { ctx.beginPath(); ctx.rect(0,0,PW,PH); }
@@ -557,29 +492,19 @@ function makePolaroidTex(imgUrl, callback) {
     ctx.fillStyle = vig;
     ctx.fillRect(padSide, padTop, IW, IH);
 
-    const tex = new THREE.CanvasTexture(cv);
-    tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
-    callback(tex, PW/PH);
-    markPhotoLoaded();
+    callback(new THREE.CanvasTexture(cv), PW/PH);
   };
-  img.onerror = () => {
-    console.warn('❌ Failed:', imgUrl);
-    callback(null);
-    markPhotoLoaded();
-  };
+  img.onerror = () => { console.warn('❌ Failed:', imgUrl); callback(null); };
   img.src = imgUrl;
 }
 
 // ─── Build Photo Meshes (Polaroid) ───────────────────────────────────────────
 function buildPhotoMeshes() {
-  // PC: dùng toàn bộ ảnh, mobile: dùng bớt để nhẹ hơn (ảnh vẫn nét, chỉ ít tấm hơn)
-  const urls = isMobile ? photoUrls.slice(0, 24) : photoUrls;
-  beginPhotoLoad(urls.length);
+  const urls = photoUrls;
   urls.forEach((url, idx) => {
     makePolaroidTex(url, (tex, aspect) => {
       if (!tex) return;
-      // Photo width: ~6 world units ≈ half heart width, visible clearly at 50cm
-      const baseW = 5.5 + Math.random()*1.5;
+      const baseW = isMobile ? (5.5 + Math.random()*2)*1.7 : 5.5 + Math.random()*2;
       const w = baseW, h = baseW / (aspect || 0.82);
 
       const mesh = new THREE.Mesh(
@@ -608,7 +533,7 @@ function buildPhotoMeshes() {
       if (!window._placedPhotoTargets) window._placedPhotoTargets = [];
       const placed = window._placedPhotoTargets;
       let angle = (idx/urls.length)*Math.PI*2;
-      let rr = isMobile ? 6+Math.random()*12 : 12+Math.random()*28;
+      let rr = isMobile ? 8+Math.random()*18 : 12+Math.random()*28;
       let tx, ty, tz, tries=0;
       while (tries<40) {
         const vAngle = (Math.random()-0.5)*Math.PI*0.8;
@@ -651,16 +576,35 @@ function toggleExplode() {
     instPill.textContent = '💖 Mãi rực rỡ nhé các bông hồng A10-K1!';
     instPill.classList.add('active');
     heroTitle.classList.add('beating');
-    textMeshes.forEach((m,i)=>{
-      m.userData.born = performance.now()*0.001 + i*0.022;
-      m.userData.orbitR = null; // reset so new orbit params assigned
-    });
+    textMeshes.forEach((m,i)=>{ m.userData.born = performance.now()*0.001 + i*0.022; });
     // Shuffle vị trí ảnh mỗi lần mở
     window._placedPhotoTargets = [];
     photoMeshes.forEach((obj,i)=>{
       if (!obj.photo) return;
       const m = obj.photo;
-      m.userData.orbitR = null; // reset so new orbit params assigned
+      const urls = photoUrls;
+      const idx = i;
+      let angle = (idx/urls.length)*Math.PI*2 + Math.random()*1.2;
+      let rr = 12 + Math.random()*28;
+      let tx, ty, tz, tries=0;
+      const placed = window._placedPhotoTargets;
+      const w = m.geometry.parameters.width, h = m.geometry.parameters.height;
+      while (tries<40) {
+        const vAngle = (Math.random()-0.5)*Math.PI*0.8;
+        tx = Math.cos(angle)*rr*Math.cos(vAngle);
+        ty = Math.sin(vAngle)*rr*0.7-1;
+        tz = Math.sin(angle)*rr*0.4-2;
+        let ok=true;
+        for (let p of placed) {
+          if (Math.hypot(tx-p.x,ty-p.y) < (Math.max(w,p.w)+Math.max(h,p.h))*0.55) { ok=false; break; }
+        }
+        if (ok) break;
+        angle += (Math.PI*2/urls.length)*(0.2+Math.random()*0.6);
+        rr += 1.5+Math.random()*3; tries++;
+      }
+      placed.push({x:tx,y:ty,z:tz,w,h});
+      m.userData.target = new THREE.Vector3(tx,ty,tz);
+      m.userData.tiltZ  = (Math.random()-0.5)*0.28;
       m.userData.born   = performance.now()*0.001 + i*0.04;
     });
   } else {
@@ -694,8 +638,8 @@ async function initHands() {
       statusEl.style.color='#ffb3cc';
       statusEl.style.borderColor='rgba(255,107,157,.35)';
       const lm=res.multiHandLandmarks[0];
-      targetX+=((1-lm[9].x-.5)*HAND_MAP_X-targetX)*.3;
-      targetY+=((-lm[9].y+.5)*HAND_MAP_Y-targetY)*.3;
+      targetX+=((1-lm[9].x-.5)*HAND_MAP_X-targetX)*.2;
+      targetY+=((-lm[9].y+.5)*HAND_MAP_Y-targetY)*.2;
       const pinch=Math.hypot(lm[4].x-lm[8].x,lm[4].y-lm[8].y)<.055;
       const flip=lastHandSide!==null&&(lm[2].x>lm[17].x)!==lastHandSide;
       lastHandSide=lm[2].x>lm[17].x;
@@ -708,23 +652,16 @@ async function initHands() {
     statusEl.textContent='🖐 Chưa thấy tay';
     statusEl.style.color='rgba(255,255,255,.25)';
   } catch(e) {
-    // Khi không có camera hoặc người dùng chặn quyền truy cập
-    statusEl.textContent='🫶 Vui lòng bật quyền camera\nđể điều khiển trái tim bằng tay nhé!';
-    statusEl.style.color='#ffb3cc';
-    statusEl.style.borderColor='rgba(255,107,157,.4)';
+    statusEl.textContent='❌ Không có camera';
+    statusEl.style.color='rgba(255,100,100,.5)';
+    statusEl.style.borderColor='rgba(255,100,100,.2)';
     console.warn('Hand tracking unavailable',e);
   }
 }
 
 // ─── Animate ──────────────────────────────────────────────────────────────────
-let _animLastT = 0;
-// Mobile: giới hạn ~30fps cho nhẹ máy, PC vẫn full fps
-const _animInterval = ('ontouchstart' in window || navigator.maxTouchPoints > 0) ? 33 : 0;
-
-function animate(ts) {
+function animate() {
   requestAnimationFrame(animate);
-  if (_animInterval && ts - _animLastT < _animInterval) return;
-  _animLastT = ts || 0;
   const time = performance.now()*.001;
 
   handX += (targetX-handX)*HAND_SMOOTH;
@@ -735,21 +672,22 @@ function animate(ts) {
   if (heartSystem) {
     heartSystem.material.uniforms.time.value = time;
 
-    // Tim cố định giữa, dịch xuống nhẹ tránh tiêu đề
-    const heartTargetY = isMobile ? -1.5 : -3;
+    // Tim cố định giữa, dịch xuống tránh tiêu đề
     heartSystem.position.x += (0  - heartSystem.position.x)*.1;
-    heartSystem.position.y += (heartTargetY - heartSystem.position.y)*.1;
+    heartSystem.position.y += (-3 - heartSystem.position.y)*.1;
     heartSystem.position.z += (0  - heartSystem.position.z)*.1;
     heartSystem.rotation.x += (0 - heartSystem.rotation.x)*.05;
     heartSystem.rotation.y += (0 - heartSystem.rotation.y)*.05;
     heartSystem.rotation.z += (0 - heartSystem.rotation.z)*.05;
 
+    // Heartbeat 72bpm — chỉ khi đóng
     const cycle = 60/72;
     const tBeat = (time%cycle)/cycle;
     const lub = Math.max(0, 1-Math.abs(tBeat-0.06)/0.06);
     const dub = Math.max(0, 1-Math.abs(tBeat-0.22)/0.07)*0.65;
     const beatAmt = Math.max(lub,dub);
 
+    // Play sound on lub peak
     if (!isExploded && lub > 0.95 && !heartSystem._lastLub) {
       playHeartbeat();
       heartSystem._lastLub = true;
@@ -759,80 +697,52 @@ function animate(ts) {
     const beat = 1.0 + (isExploded ? 0 : 0.028*beatAmt);
     heartSystem.scale.setScalar(beat);
 
+    // Particles lerp + hand offset
     const lsp = isExploded ? .028 : .11;
     const pos  = heartSystem.geometry.attributes.position.array;
     const base = heartSystem.geometry.attributes.basePos.array;
     const tgt  = heartSystem.geometry.attributes.target.array;
     const hOffX = isExploded ? handX*HAND_EFFECT : 0;
     const hOffY = isExploded ? handY*HAND_EFFECT : 0;
-
-    if (isExploded) {
-      // Exploded: lerp toward target + hand offset
-      for (let j=0;j<activeHeartCount*3;j+=3) {
-        pos[j]   += (tgt[j]  +hOffX - pos[j])  *lsp;
-        pos[j+1] += (tgt[j+1]+hOffY - pos[j+1])*lsp;
-        pos[j+2] += (tgt[j+2]       - pos[j+2])*lsp;
+    for (let j=0;j<HEART_COUNT*3;j++) {
+      let goal = isExploded ? tgt[j] : base[j];
+      const axis = j%3;
+      if (isExploded) {
+        if(axis===0) goal+=hOffX;
+        else if(axis===1) goal+=hOffY;
       }
-    } else {
-      // Closed: fast lerp back to base shape
-      for (let j=0;j<activeHeartCount*3;j++) {
-        pos[j] += (base[j]-pos[j])*lsp;
-      }
+      const drift = isExploded ? Math.sin(time*.7+j*.0006)*.06 : 0;
+      pos[j] += (goal-pos[j])*lsp + drift;
     }
     heartSystem.geometry.attributes.position.needsUpdate = true;
   }
 
-  // ── Text meshes: orbit autonomously always ──────────────────────────────────
+  // Text meshes
   textMeshes.forEach((m, idx) => {
     if (isExploded) {
       const elapsed = time - (m.userData.born||0);
       if (elapsed < (m.userData.delay||0)) return;
       m.visible = true;
-
-      // Each text has its own orbit params
-      const ud = m.userData;
-      if (!ud.orbitR) {
-        // assign stable orbit params once
-        // Text flies closer to camera than photos (lower z offset = closer)
-        const textRing = Math.floor(idx / 6); // 6 texts per ring
-        const posInTextRing = idx % 6;
-        const textRings = Math.ceil(textMeshes.length / 6);
-
-        ud.orbitR    = 16 + textRing * 6 + Math.random()*2;
-        ud.orbitTilt = (Math.random()-0.5)*0.9;
-        ud.orbitPhase= (posInTextRing / 6) * Math.PI * 2 + (Math.random()-0.5)*0.4;
-        ud.orbitSpeed= (0.10 + Math.random()*0.14) * (textRing%2===0 ? 1 : -1);
-        ud.heightBand = ((textRing / Math.max(textRings-1, 1)) - 0.5) * 10;
-        ud.bobAmp    = 0.15 + Math.random()*0.25;
-        ud.bobSpeed  = 0.45 + Math.random()*0.5;
-        ud.bobOffset = Math.random()*Math.PI*2;
-      }
-
-      const angle  = time * ud.orbitSpeed + ud.orbitPhase;
-      const wx = handX*HAND_EFFECT*0.35, wy = handY*HAND_EFFECT*0.35;
-      const tx = Math.cos(angle) * ud.orbitR + wx;
-      const tz = Math.sin(angle) * ud.orbitR * 0.25 + 2; // slightly in front (positive z = towards camera)
-      const ty = Math.sin(angle * 0.65 + ud.orbitTilt) * ud.orbitR * 0.4
-               + ud.heightBand
-               + Math.sin(time * ud.bobSpeed + ud.bobOffset) * ud.bobAmp
-               + wy;
-
-      m.position.x += (tx - m.position.x) * .045;
-      m.position.y += (ty - m.position.y) * .045;
-      m.position.z += (tz - m.position.z) * .045;
+      const tgt = m.userData.target;
+      const wx = handX*HAND_EFFECT, wy = handY*HAND_EFFECT;
+      m.position.x += (tgt.x+wx - m.position.x)*.06;
+      m.position.y += (tgt.y+wy - m.position.y)*.06;
+      m.position.z += (tgt.z    - m.position.z)*.06;
       m.lookAt(camera.position);
-      m.material.opacity += (0.92 - m.material.opacity) * .05;
+      m.material.opacity += (1-m.material.opacity)*.05;
+      m.position.y += Math.sin(time*.6+idx*.4)*.008;
+      m.position.x += Math.cos(time*.5+idx*.3)*.005;
     } else {
-      m.material.opacity += (0 - m.material.opacity) * .16;
+      m.material.opacity += (0-m.material.opacity)*.16;
       const hx=heartSystem.position.x, hy=heartSystem.position.y, hz=heartSystem.position.z;
-      m.position.x += (hx - m.position.x) * .10;
-      m.position.y += (hy - m.position.y) * .10;
-      m.position.z += (hz - m.position.z) * .10;
+      m.position.x += (hx-m.position.x)*.10;
+      m.position.y += (hy-m.position.y)*.10;
+      m.position.z += (hz-m.position.z)*.10;
       if (m.material.opacity<.003) { m.visible=false; m.position.set(hx,hy,hz); }
     }
   });
 
-  // Raycaster for hover (desktop only)
+  // Raycaster for hover (desktop)
   if (!isMobile && raycaster && pointer) {
     raycaster.setFromCamera(pointer, camera);
     const hits = raycaster.intersectObjects(photoMeshes.map(o=>o.photo).filter(Boolean));
@@ -840,19 +750,20 @@ function animate(ts) {
     photoMeshes.forEach(o=>{ if(o.photo) o.photo.userData.isHover=(o.photo===hitMesh); });
   }
 
-  // ── Photo meshes: orbit autonomously in 3D ──────────────────────────────────
+  // Photo meshes
   photoMeshes.forEach((obj, idx) => {
     const m = obj.photo, glow = obj.glow;
     if (!m) return;
 
     const isHover = !!m.userData.isHover;
+    // Hover scale
     const tScale = isHover ? 1.09 : 1.0;
     m.scale.x += (tScale - m.scale.x)*.12;
     m.scale.y += (tScale - m.scale.y)*.12;
 
     if (glow) {
       glow.visible = m.visible;
-      const glowT = isHover ? 0.75 : (isExploded ? 0.08 : 0);
+      const glowT = isHover ? 0.75 : (isExploded ? 0.05 : 0);
       glow.material.opacity += (glowT - glow.material.opacity)*.08;
       if (m.geometry?.parameters) {
         const bw=m.geometry.parameters.width, bh=m.geometry.parameters.height;
@@ -867,63 +778,23 @@ function animate(ts) {
       if (elapsed<(m.userData.delay||0)) return;
       m.visible=true; if(glow) glow.visible=true;
 
-      const ud = m.userData;
-      // assign orbit params once per explode (reset in toggleExplode)
-      if (!ud.orbitR) {
-        const total = photoMeshes.length;
-        const ring = Math.floor(idx / 8);
-        const posInRing = idx % 8;
-        const rings = Math.ceil(total / 8);
-
-        // Lớn hơn radius, bước ring lớn hơn để tách xa nhau
-        const baseR   = 18;
-        const ringStep = 14; // tăng từ 10 → 14
-        ud.orbitR = baseR + ring * ringStep + Math.random() * 2;
-
-        // Mỗi ảnh trong ring có phase đều đặn, ít jitter
-        ud.orbitPhase = (posInRing / 8) * Math.PI * 2 + (Math.random()-0.5)*0.15;
-        ud.orbitSpeed = (0.05 + Math.random()*0.05) * (ring%2===0 ? 1 : -1);
-
-        // Height band rộng hơn để ảnh trải đều theo chiều dọc
-        const heightBand = (ring / Math.max(rings-1,1)) - 0.5;
-        ud.orbitHeightOffset = heightBand * 22; // tăng từ 16 → 22
-
-        // Mỗi ảnh có Z depth riêng — tách lớp 3D tránh chồng khi nhìn thẳng
-        ud.orbitZOffset = (posInRing - 3.5) * 2.5;
-
-        ud.orbitTiltZ = (Math.random()-0.5) * 0.3;
-        ud.bobAmp     = 0.06 + Math.random()*0.10;
-        ud.bobSpeed   = 0.25 + Math.random()*0.35;
-        ud.bobOffset  = Math.random()*Math.PI*2;
-        ud.tiltZ      = (Math.random()-0.5)*0.22;
-        ud.spinVel    = (Math.random()-0.5)*0.002;
-        ud.spinAccum  = 0;
-      }
-
-      const angle = time * ud.orbitSpeed + ud.orbitPhase;
-      const wx = handX*HAND_EFFECT*0.25, wy = handY*HAND_EFFECT*0.25;
-
-      const tx = Math.cos(angle) * ud.orbitR + wx;
-      const ty = ud.orbitHeightOffset
-               + Math.sin(angle * 0.5 + ud.orbitTiltZ) * ud.orbitR * 0.28
-               + Math.sin(time * ud.bobSpeed + ud.bobOffset) * ud.bobAmp
-               + wy;
-      // Z: orbit depth + per-photo offset để không đè lên nhau
-      const tz = Math.sin(angle) * ud.orbitR * 0.28 + ud.orbitZOffset - 2;
-
-      m.position.x += (tx - m.position.x) * .038;
-      m.position.y += (ty - m.position.y) * .038;
-      m.position.z += (tz - m.position.z) * .038;
+      const tgt=m.userData.target;
+      const wx=handX*HAND_EFFECT, wy=handY*HAND_EFFECT;
+      m.position.x += (tgt.x+wx - m.position.x)*.04;
+      m.position.y += (tgt.y+wy - m.position.y)*.04;
+      m.position.z += (tgt.z    - m.position.z)*.04;
 
       if (glow) { glow.position.copy(m.position); glow.position.z=m.position.z-0.02; }
 
       m.lookAt(camera.position);
-      ud.spinAccum += ud.spinVel;
-      m.rotateZ(ud.tiltZ + ud.spinAccum);
+      m.rotateZ(m.userData.tiltZ||0);
 
-      m.material.opacity += (0.93 - m.material.opacity) * .04;
+      m.position.y += Math.sin(time*.4+idx*.6)*.01;
+      m.position.x += Math.cos(time*.35+idx*.5)*.007;
+
+      m.material.opacity += (0.93-m.material.opacity)*.04;
     } else {
-      m.material.opacity += (0 - m.material.opacity) * .14;
+      m.material.opacity += (0-m.material.opacity)*.14;
       const hx=heartSystem.position.x, hy=heartSystem.position.y, hz=heartSystem.position.z;
       m.position.x += (hx-m.position.x)*.09;
       m.position.y += (hy-m.position.y)*.09;
@@ -933,8 +804,6 @@ function animate(ts) {
         m.visible=false; if(glow) glow.visible=false;
         m.position.set(hx,hy,hz);
         if(glow) glow.position.set(hx,hy,hz-0.02);
-        // reset orbit so next explode gets fresh params
-        m.userData.orbitR = null;
       }
     }
   });
@@ -944,16 +813,11 @@ function animate(ts) {
 
 // ─── Resize ───────────────────────────────────────────────────────────────────
 window.addEventListener('resize', ()=>{
-  const aspect = innerWidth / innerHeight;
-  camera.aspect = aspect;
+  camera.aspect=innerWidth/innerHeight;
   camera.updateProjectionMatrix();
-  renderer.setSize(innerWidth, innerHeight);
-  const tanHalfFov = Math.tan(30 * Math.PI / 180); // tan(FOV/2) for FOV=60
-  const heartHalfH = 13;
-  const isPortrait = innerHeight > innerWidth;
-  const camZByHeight = heartHalfH / (0.52 * tanHalfFov);
-  const camZByWidth  = heartHalfH / (0.40 * tanHalfFov * aspect);
-  camera.position.z = isPortrait ? camZByHeight : Math.max(camZByHeight, camZByWidth);
+  renderer.setSize(innerWidth,innerHeight);
+  // Re-scale camera distance on resize
+  camera.position.z = isMobile ? 108 : 24;
 });
 
 // ─── Boot ─────────────────────────────────────────────────────────────────────
@@ -969,8 +833,7 @@ function resizeFX() {
 
 // Cherry blossoms
 const petals = [];
-// Mobile: ít cánh hoa hơn, PC giữ nguyên
-const PETAL_COUNT = ('ontouchstart' in window || navigator.maxTouchPoints > 0) ? 12 : 55;
+const PETAL_COUNT = 55;
 function initPetals() {
   for (let i=0;i<PETAL_COUNT;i++) {
     petals.push({
@@ -1004,8 +867,7 @@ function drawPetal(p) {
 
 // Mouse trail
 const trail = [];
-// Mobile: trail ngắn hơn, PC giữ nguyên
-const TRAIL_MAX = ('ontouchstart' in window || navigator.maxTouchPoints > 0) ? 10 : 28;
+const TRAIL_MAX = 28;
 let mouseTrailX = -9999, mouseTrailY = -9999;
 let mouseHasMoved = false;
 window.addEventListener('mousemove', e => { mouseTrailX=e.clientX; mouseTrailY=e.clientY; mouseHasMoved=true; });
@@ -1013,14 +875,8 @@ window.addEventListener('touchmove', e => {
   if(e.touches.length){ mouseTrailX=e.touches[0].clientX; mouseTrailY=e.touches[0].clientY; mouseHasMoved=true; }
 }, {passive:true});
 
-let _fxLastT = 0;
-// Mobile: giới hạn ~30fps cho nhẹ máy, PC full fps
-const _fxInterval = ('ontouchstart' in window || navigator.maxTouchPoints > 0) ? 33 : 0;
-
-function animateFX(ts) {
+function animateFX() {
   requestAnimationFrame(animateFX);
-  if (_fxInterval && ts - _fxLastT < _fxInterval) return;
-  _fxLastT = ts;
   fx.clearRect(0,0,fxW,fxH);
 
   // Trail — chỉ vẽ sau khi user thực sự di chuột
@@ -1062,51 +918,16 @@ function animateFX(ts) {
   }
 }
 
-// Boot as soon as DOM + synchronous scripts ready — ảnh phải load xong mới cho vào
-function bootApp() {
-  try {
-    setLoadStatus('Initializing canvas...');
-    resizeFX();
-    initPetals();
-    setLoadStatus('Building 3D scene...');
-    initThree();
-    setLoadStatus('Loading photos...');
-    buildPhotoMeshes();
-    // Bắt đầu animation, nhưng vẫn giữ màn loading cho tới khi toàn bộ ảnh báo xong
-    animate();
-    animateFX();
-    initHands();
-
-    // Phòng trường hợp CDN ảnh quá chậm hoặc lỗi mạng:
-    // nếu sau 15s vẫn chưa báo xong ảnh thì vẫn cho vào để không bị kẹt mãi.
-    setTimeout(() => {
-      if (!photosDone) {
-        console.warn('Photos still not fully loaded after timeout, continue anyway.');
-        onAllPhotosReady();
-      }
-    }, 15000);
-  } catch(e) {
-    console.error('Init error:', e);
-    setLoadStatus('Error: ' + e.message);
-    setTimeout(() => {
-      if (loadingEl) {
-        loadingEl.classList.add('out');
-        setTimeout(() => { try { loadingEl.remove(); } catch(e2){} }, 800);
-      }
-    }, 1500);
-  }
-}
-
-// Try immediately if THREE already loaded, else wait for it
-if (typeof THREE !== 'undefined') {
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', bootApp);
-  } else {
-    bootApp();
-  }
-} else {
-  window.addEventListener('load', bootApp);
-}
+window.onload = () => {
+  resizeFX();
+  initPetals();
+  initThree();
+  buildPhotoMeshes();
+  animate();
+  animateFX();
+  initHands();
+  setTimeout(()=>{ loadingEl.classList.add('out'); setTimeout(()=>loadingEl.remove(),1300); }, 2800);
+};
 
 window.addEventListener('resize', resizeFX);
 </script>
