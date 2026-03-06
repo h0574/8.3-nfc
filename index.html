@@ -124,15 +124,20 @@
   #intro-bg{position:absolute;inset:0;background:radial-gradient(ellipse at 50% 60%,rgba(255,107,157,.18),transparent 70%)}
   #intro-content{position:relative;z-index:1;text-align:center;padding:0 clamp(24px,8vw,80px);max-width:700px;width:100%}
   #intro-label{font-size:clamp(.7rem,2vw,.85rem);letter-spacing:.35em;text-transform:uppercase;color:rgba(255,179,204,.5);margin-bottom:clamp(24px,5vh,48px);opacity:0;animation:up .8s .2s both}
-  #intro-content{position:relative;z-index:1;text-align:center;padding:0 clamp(28px,8vw,100px);max-width:680px;width:100%}
+  #intro-content{position:relative;z-index:1;text-align:center;padding:0 clamp(16px,4vw,80px);max-width:720px;width:100%}
   #intro-text{
     font-family:'DM Sans',sans-serif;font-weight:300;
-    font-size:clamp(1.1rem,3.2vw,1.7rem);line-height:1.75;
+    font-size:clamp(.88rem,2.5vw,1.38rem);line-height:1.75;
     color:rgba(255,255,255,.92);
-    text-shadow:0 0 60px rgba(255,107,157,.35);
-    min-height:4em;letter-spacing:.01em;
+    text-shadow:0 0 40px rgba(255,107,157,.3);
+    min-height:5em;letter-spacing:.01em;
+    word-break:normal;overflow-wrap:normal;white-space:normal;
   }
-  .intro-char{display:inline-block;opacity:0;transform:translateY(-10px) scale(0.92);animation:charDrop .38s cubic-bezier(0.34,1.5,0.64,1) forwards}
+  .intro-word{display:inline-block;white-space:nowrap;}
+  .intro-word::after{content:'\00a0';display:inline-block;}
+  .intro-word:last-child::after{display:none;}
+  .intro-char{display:inline-block;opacity:0;transform:translateY(-10px) scale(0.9)}
+  .intro-char.visible{animation:charDrop .28s cubic-bezier(0.34,1.5,0.64,1) forwards}
   @keyframes charDrop{to{opacity:1;transform:translateY(0) scale(1)}}
   #intro-next{margin-top:clamp(32px,6vh,52px);opacity:0;transition:opacity .6s}
   #intro-next.show{opacity:1}
@@ -158,12 +163,8 @@
   .intro-dot.active{background:#ff6b9d;transform:scale(1.4);box-shadow:0 0 8px rgba(255,107,157,.7)}
   .intro-dot.done{background:rgba(255,179,204,.4);transform:scale(1)}
   #intro-canvas{position:absolute;inset:0;pointer-events:none;z-index:0}
-  .intro-char{display:inline-block;opacity:0;transform:translateY(-10px) scale(0.92);
-    animation:charDrop .38s cubic-bezier(0.34,1.5,0.64,1) forwards}
-  .intro-char.glow{
-    text-shadow:0 0 18px rgba(255,179,204,0.9), 0 0 40px rgba(255,107,157,0.5);
-    animation:charDrop .38s cubic-bezier(0.34,1.5,0.64,1) forwards, shimmer 2.5s 0.4s ease-in-out infinite;
-  }
+
+
   @keyframes shimmer{
     0%,100%{filter:brightness(1)}
     50%{filter:brightness(1.35) drop-shadow(0 0 8px rgba(255,179,204,0.8))}
@@ -351,7 +352,7 @@ function initThree() {
   isMobile = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
   camera = new THREE.PerspectiveCamera(68, innerWidth/innerHeight, 0.1, 1000);
   // Scale camera — mobile gets closer so heart is bigger (+40%)
-  const camZ = isMobile ? 108 : 24;
+  const camZ = isMobile ? 52 : 24;
   camera.position.z = camZ;
 
   renderer = new THREE.WebGLRenderer({
@@ -886,7 +887,7 @@ window.addEventListener('resize', ()=>{
   camera.updateProjectionMatrix();
   renderer.setSize(innerWidth,innerHeight);
   // Re-scale camera distance on resize
-  camera.position.z = isMobile ? 108 : 24;
+  camera.position.z = isMobile ? 52 : 24;
 });
 
 // ─── Boot ─────────────────────────────────────────────────────────────────────
@@ -947,6 +948,8 @@ window.addEventListener('touchmove', e => {
 function animateFX() {
   requestAnimationFrame(animateFX);
   fx.clearRect(0,0,fxW,fxH);
+
+
 
   // Trail — chỉ vẽ sau khi user thực sự di chuột
   if (mouseHasMoved) trail.push({x:mouseTrailX, y:mouseTrailY, age:0});
@@ -1034,26 +1037,33 @@ function introType(msg) {
   introTextEl.innerHTML = '';
   introNextEl.classList.remove('show');
   introTyping = true;
+  const words = msg.split(' ');
   let i = 0;
+  const frag = document.createDocumentFragment();
+  words.forEach(w => {
+    const sp = document.createElement('span');
+    sp.className = 'intro-char intro-word';
+    sp.textContent = w;
+    frag.appendChild(sp);
+  });
+  introTextEl.appendChild(frag);
+  const spans = introTextEl.querySelectorAll('.intro-char');
   function next() {
-    if (i >= msg.length) {
+    if (i >= spans.length) {
       introTyping = false;
       setTimeout(() => introNextEl.classList.add('show'), 300);
       return;
     }
-    const ch = msg[i];
-    const span = document.createElement('span');
-    span.className = 'intro-char glow';
-    span.style.animationDelay = '0ms';
-    span.textContent = ch === ' ' ? ' ' : ch;
-    introTextEl.appendChild(span);
-    i++;
-    const delay = /[,،]/.test(ch) ? 80 : /[.!?…🌸💖]/.test(ch) ? 60 : 18;
+    const sp = spans[i]; i++;
+    void sp.offsetWidth;
+    sp.classList.add('visible');
+    const word = sp.textContent;
+    const lastCh = word[word.length-1];
+    const delay = /[,،]/.test(lastCh) ? 120 : /[.!?…]/.test(lastCh) ? 200 : 85;
     introTypeTO = setTimeout(next, delay);
   }
   next();
 }
-
 function introAdvance() {
   if (introTyping) {
     clearTimeout(introTypeTO);
@@ -1063,7 +1073,8 @@ function introAdvance() {
     for (const ch of msg) {
       const span = document.createElement('span');
       span.className = 'intro-char';
-      span.style.cssText = 'animation:none;opacity:1;transform:none';
+      span.style.cssText = 'opacity:1;transform:none;animation:none';
+      span.classList.add('visible');
       span.textContent = ch === ' ' ? ' ' : ch;
       introTextEl.appendChild(span);
     }
@@ -1085,7 +1096,7 @@ function introAdvance() {
 // ── Intro Particles ──
 let introParticles = [];
 let introCanvasEl, introCtx2, ipcW, ipcH, ipcRAF;
-const IPC = 55;
+const IPC = ('ontouchstart' in window || navigator.maxTouchPoints > 0) ? 12 : 45;
 
 function initIntroCanvas() {
   introCanvasEl = document.getElementById('intro-canvas');
@@ -1109,9 +1120,13 @@ function initIntroCanvas() {
   }
 }
 
+let _ipcLastT = 0;
+const _ipcInterval = ('ontouchstart' in window || navigator.maxTouchPoints > 0) ? 40 : 0;
 function animateIntroCanvas(ts) {
   if (!introCtx2) return;
   ipcRAF = requestAnimationFrame(animateIntroCanvas);
+  if (_ipcInterval && ts - _ipcLastT < _ipcInterval) return;
+  _ipcLastT = ts;
   introCtx2.clearRect(0, 0, ipcW, ipcH);
   for (const p of introParticles) {
     p.x += p.vx + Math.sin(ts * 0.0005 + p.twinkle) * 0.18;
