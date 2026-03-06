@@ -117,11 +117,80 @@
     .pill { font-size:.64rem; padding:5px 12px; margin-top:12px; }
     .inst-pill { font-size:.68rem !important; padding:9px 16px !important; }
   }
+
+  /* ── Intro ── */
+  #intro-screen{position:fixed;inset:0;z-index:2000;display:flex;align-items:center;justify-content:center;background:#060008;transition:opacity 1.2s,visibility 1.2s}
+  #intro-screen.out{opacity:0;visibility:hidden;pointer-events:none}
+  #intro-bg{position:absolute;inset:0;background:radial-gradient(ellipse at 50% 60%,rgba(255,107,157,.18),transparent 70%)}
+  #intro-content{position:relative;z-index:1;text-align:center;padding:0 clamp(24px,8vw,80px);max-width:700px;width:100%}
+  #intro-label{font-size:clamp(.7rem,2vw,.85rem);letter-spacing:.35em;text-transform:uppercase;color:rgba(255,179,204,.5);margin-bottom:clamp(24px,5vh,48px);opacity:0;animation:up .8s .2s both}
+  #intro-content{position:relative;z-index:1;text-align:center;padding:0 clamp(28px,8vw,100px);max-width:680px;width:100%}
+  #intro-text{
+    font-family:'DM Sans',sans-serif;font-weight:300;
+    font-size:clamp(1.1rem,3.2vw,1.7rem);line-height:1.75;
+    color:rgba(255,255,255,.92);
+    text-shadow:0 0 60px rgba(255,107,157,.35);
+    min-height:4em;letter-spacing:.01em;
+  }
+  .intro-char{display:inline-block;opacity:0;transform:translateY(-10px) scale(0.92);animation:charDrop .38s cubic-bezier(0.34,1.5,0.64,1) forwards}
+  @keyframes charDrop{to{opacity:1;transform:translateY(0) scale(1)}}
+  #intro-next{margin-top:clamp(32px,6vh,52px);opacity:0;transition:opacity .6s}
+  #intro-next.show{opacity:1}
+  #intro-tap{
+    display:inline-flex;align-items:center;gap:8px;
+    font-size:clamp(.68rem,1.8vw,.8rem);letter-spacing:.22em;text-transform:uppercase;
+    color:rgba(255,179,204,.5);cursor:pointer;
+    animation:tapPulse 2.2s ease-in-out infinite;
+  }
+  #intro-tap::before{content:'';display:inline-block;width:18px;height:1px;background:rgba(255,179,204,.3)}
+  #intro-tap::after{content:'';display:inline-block;width:18px;height:1px;background:rgba(255,179,204,.3)}
+  @keyframes tapPulse{0%,100%{opacity:.4;transform:scaleX(1)}50%{opacity:.85;transform:scaleX(1.03)}}
+  #intro-progress{
+    margin-top:clamp(20px,4vh,36px);
+    display:flex;gap:8px;justify-content:center;align-items:center;
+  }
+  .intro-dot{
+    width:6px;height:6px;border-radius:50%;
+    background:rgba(255,255,255,.15);
+    transition:all .45s cubic-bezier(0.34,1.56,0.64,1);
+    flex-shrink:0;
+  }
+  .intro-dot.active{background:#ff6b9d;transform:scale(1.4);box-shadow:0 0 8px rgba(255,107,157,.7)}
+  .intro-dot.done{background:rgba(255,179,204,.4);transform:scale(1)}
+  #intro-canvas{position:absolute;inset:0;pointer-events:none;z-index:0}
+  .intro-char{display:inline-block;opacity:0;transform:translateY(-10px) scale(0.92);
+    animation:charDrop .38s cubic-bezier(0.34,1.5,0.64,1) forwards}
+  .intro-char.glow{
+    text-shadow:0 0 18px rgba(255,179,204,0.9), 0 0 40px rgba(255,107,157,0.5);
+    animation:charDrop .38s cubic-bezier(0.34,1.5,0.64,1) forwards, shimmer 2.5s 0.4s ease-in-out infinite;
+  }
+  @keyframes shimmer{
+    0%,100%{filter:brightness(1)}
+    50%{filter:brightness(1.35) drop-shadow(0 0 8px rgba(255,179,204,0.8))}
+  }
+  /* Decorative line above text */
+  #intro-deco{
+    width:40px;height:1.5px;margin:0 auto clamp(20px,4vh,36px);
+    background:linear-gradient(90deg,transparent,#ff6b9d,transparent);
+    opacity:0;animation:up .8s .4s both;
+  }
 </style>
 </head>
 <body>
 
 <div id="cursor"></div>
+
+<div id="intro-screen">
+  <div id="intro-bg"></div>
+  <canvas id="intro-canvas"></canvas>
+  <div id="intro-content">
+    <div id="intro-label">🌸 Gửi tới A10-K1</div>
+    <div id="intro-deco"></div>
+    <div id="intro-text"></div>
+    <div id="intro-next"><span id="intro-tap">Chạm để tiếp tục</span></div>
+    <div id="intro-progress"></div>
+  </div>
+</div>
 
 <div id="loading">
   <div class="load-logo">8/3</div>
@@ -448,10 +517,6 @@ const photoUrls = [
   "https://res.cloudinary.com/dzvflvhwy/image/upload/v1772381672/6anh_ms4rg6.jpg",
   "https://res.cloudinary.com/dzvflvhwy/image/upload/v1772381672/1anh_h9ykkk.jpg",
   "https://res.cloudinary.com/dzvflvhwy/image/upload/v1772381672/2anh_h6koct.jpg",
-  "https://res.cloudinary.com/dzvflvhwy/image/upload/v1772383121/bd1bdec4-eb27-4362-9f1a-48cc36af9f0f.png",
-  "https://res.cloudinary.com/dzvflvhwy/image/upload/v1772383350/586210755_122195323838326452_6727449979373333836_n_keots0.jpg",
-  "https://res.cloudinary.com/dzvflvhwy/image/upload/v1772383369/502410944_122173765640326452_8238867378227711492_n_zsrlqe.jpg",
-
 ];
 
 let photoMeshes = [];
@@ -922,7 +987,7 @@ function animateFX() {
   }
 }
 
-window.onload = () => {
+function bootApp() {
   resizeFX();
   initPetals();
   initThree();
@@ -931,7 +996,160 @@ window.onload = () => {
   animateFX();
   initHands();
   setTimeout(()=>{ loadingEl.classList.add('out'); setTimeout(()=>loadingEl.remove(),1300); }, 2800);
-};
+}
+
+// ── Intro logic ──
+const introMessages = [
+  "Chúc bạn luôn vui vẻ, xinh đẹp và gặp thật nhiều điều tốt đẹp trong cuộc sống. Cảm ơn vì đã là một phần của A10-K1. Happy 8/3!",
+  "Chúc bạn luôn giữ được nụ cười tươi như bây giờ và có thật nhiều kỷ niệm đẹp trong quãng thời gian học cùng A10-K1.",
+  "Cảm ơn vì đã cùng nhau tạo nên những ngày đi học đầy tiếng cười. Chúc bạn một ngày 8/3 thật vui và hạnh phúc. – A10-K1",
+  "Chúc bạn luôn mạnh mẽ, tự tin và gặp nhiều may mắn trên con đường phía trước. A10-K1 luôn ở đây.",
+  "Mong rằng mỗi ngày của bạn đều có thật nhiều niềm vui và những điều khiến bạn mỉm cười. Happy 8/3!",
+];
+let introIdx = 0, introTyping = false, introTypeTO = null;
+const introScreen  = document.getElementById('intro-screen');
+const introTextEl  = document.getElementById('intro-text');
+const introNextEl  = document.getElementById('intro-next');
+const introProgEl  = document.getElementById('intro-progress');
+
+// Build dots
+function buildIntroDots() {
+  introProgEl.innerHTML = '';
+  introMessages.forEach((_, i) => {
+    const d = document.createElement('div');
+    d.className = 'intro-dot' + (i===0 ? ' active' : '');
+    d.id = 'intro-dot-' + i;
+    introProgEl.appendChild(d);
+  });
+}
+function updateIntroDots(idx) {
+  introMessages.forEach((_, i) => {
+    const d = document.getElementById('intro-dot-' + i);
+    if (!d) return;
+    d.className = 'intro-dot' + (i === idx ? ' active' : i < idx ? ' done' : '');
+  });
+}
+
+function introType(msg) {
+  introTextEl.innerHTML = '';
+  introNextEl.classList.remove('show');
+  introTyping = true;
+  let i = 0;
+  function next() {
+    if (i >= msg.length) {
+      introTyping = false;
+      setTimeout(() => introNextEl.classList.add('show'), 300);
+      return;
+    }
+    const ch = msg[i];
+    const span = document.createElement('span');
+    span.className = 'intro-char glow';
+    span.style.animationDelay = '0ms';
+    span.textContent = ch === ' ' ? ' ' : ch;
+    introTextEl.appendChild(span);
+    i++;
+    const delay = /[,،]/.test(ch) ? 80 : /[.!?…🌸💖]/.test(ch) ? 60 : 18;
+    introTypeTO = setTimeout(next, delay);
+  }
+  next();
+}
+
+function introAdvance() {
+  if (introTyping) {
+    clearTimeout(introTypeTO);
+    introTyping = false;
+    const msg = introMessages[introIdx];
+    introTextEl.innerHTML = '';
+    for (const ch of msg) {
+      const span = document.createElement('span');
+      span.className = 'intro-char';
+      span.style.cssText = 'animation:none;opacity:1;transform:none';
+      span.textContent = ch === ' ' ? ' ' : ch;
+      introTextEl.appendChild(span);
+    }
+    introNextEl.classList.add('show');
+    return;
+  }
+  introIdx++;
+  updateIntroDots(introIdx);
+  if (introIdx >= introMessages.length) {
+    stopIntroCanvas();
+    introScreen.classList.add('out');
+    setTimeout(() => introScreen.remove(), 1300);
+    bootApp();
+    return;
+  }
+  introType(introMessages[introIdx]);
+}
+
+// ── Intro Particles ──
+let introParticles = [];
+let introCanvasEl, introCtx2, ipcW, ipcH, ipcRAF;
+const IPC = 55;
+
+function initIntroCanvas() {
+  introCanvasEl = document.getElementById('intro-canvas');
+  if (!introCanvasEl) return;
+  introCtx2 = introCanvasEl.getContext('2d');
+  ipcW = introCanvasEl.width  = innerWidth;
+  ipcH = introCanvasEl.height = innerHeight;
+  introParticles = [];
+  for (let i = 0; i < IPC; i++) {
+    introParticles.push({
+      x: Math.random() * ipcW,
+      y: Math.random() * ipcH,
+      r: 1.2 + Math.random() * 2.8,
+      vx: (Math.random() - 0.5) * 0.35,
+      vy: -0.15 - Math.random() * 0.4,
+      opacity: 0.1 + Math.random() * 0.55,
+      hue: 330 + Math.random() * 30,
+      twinkle: Math.random() * Math.PI * 2,
+      twinkleSpeed: 0.02 + Math.random() * 0.04,
+    });
+  }
+}
+
+function animateIntroCanvas(ts) {
+  if (!introCtx2) return;
+  ipcRAF = requestAnimationFrame(animateIntroCanvas);
+  introCtx2.clearRect(0, 0, ipcW, ipcH);
+  for (const p of introParticles) {
+    p.x += p.vx + Math.sin(ts * 0.0005 + p.twinkle) * 0.18;
+    p.y += p.vy;
+    p.twinkle += p.twinkleSpeed;
+    if (p.y < -10) { p.y = ipcH + 10; p.x = Math.random() * ipcW; }
+    const alpha = p.opacity * (0.55 + 0.45 * Math.sin(p.twinkle));
+    // Glow ring
+    const grad = introCtx2.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.r * 2.5);
+    grad.addColorStop(0, `hsla(${p.hue},90%,80%,${alpha})`);
+    grad.addColorStop(0.5, `hsla(${p.hue},80%,70%,${alpha * 0.5})`);
+    grad.addColorStop(1, `hsla(${p.hue},70%,60%,0)`);
+    introCtx2.beginPath();
+    introCtx2.arc(p.x, p.y, p.r * 2.5, 0, Math.PI * 2);
+    introCtx2.fillStyle = grad;
+    introCtx2.fill();
+    // Core dot
+    introCtx2.beginPath();
+    introCtx2.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+    introCtx2.fillStyle = `hsla(${p.hue},95%,92%,${alpha * 1.2})`;
+    introCtx2.fill();
+  }
+}
+
+function stopIntroCanvas() {
+  if (ipcRAF) cancelAnimationFrame(ipcRAF);
+}
+
+function startIntro() {
+  buildIntroDots();
+  initIntroCanvas();
+  requestAnimationFrame(animateIntroCanvas);
+  introType(introMessages[0]);
+  introScreen.addEventListener('click', introAdvance);
+  introScreen.addEventListener('touchend', e => { e.preventDefault(); introAdvance(); }, {passive:false});
+}
+
+window.onload = startIntro;
 
 window.addEventListener('resize', resizeFX);
 </script>
